@@ -1087,17 +1087,17 @@ class Data(Dataset):
         PAST the observed training horizon (the normalised value then exceeds |1|). Used by the
         future/extrapolation generation paths; real-visit reconstruction keeps the clamp.
 
-        Applies atlas_gen.cond_scale so the time input stays consistent with the atlas-generation
+        Applies model_gen.cond_scale so the time input stays consistent with the render-generation
         path (utils.normalize_condition), which also multiplies by cond_scale. With cond_scale=1.0
         this is a no-op; the multiplication only matters if cond_scale is ever changed, in which case
-        train/predict_future and atlas generation would otherwise silently diverge.
+        training and render generation would otherwise silently diverge.
         """
         temporal_key = self._get_temporal_key()
         val = float(row_dict[temporal_key])
         if normalize:
             c_min = self.args['dataset']['constraints'][temporal_key]['min']
             c_max = self.args['dataset']['constraints'][temporal_key]['max']
-            cond_scale = self.args['atlas_gen']['cond_scale']
+            cond_scale = self.args['model_gen']['cond_scale']
             # Clamp out-of-range time (e.g. extrapolated visits past the last real one) to the actual
             # observed range so the SIREN sees an in-distribution input (boundary appearance) instead
             # of saturating to black/white. No-op for all in-range training/interpolation values
@@ -1128,7 +1128,7 @@ class Data(Dataset):
                     # when allow_extrapolation=True so future predictions progress past the horizon.
                     if not allow_extrapolation:
                         val = min(max(float(val), c_min), c_max)
-                    val = (((val - c_min) / (c_max - c_min)) * 2 - 1) * self.args['atlas_gen']['cond_scale']  # we normalise between -1 and 1
+                    val = (((val - c_min) / (c_max - c_min)) * 2 - 1) * self.args['model_gen']['cond_scale']  # we normalise between -1 and 1
                 conditions.append(val)
         
         return torch.tensor(conditions, dtype=torch.float32)

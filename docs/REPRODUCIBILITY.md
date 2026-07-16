@@ -15,8 +15,8 @@ This is the end-to-end recipe to reproduce the paper's numbers. It assumes the e
 
 ## 1. Best GAP-INR model
 
-The best configuration is [`ablations/configs/r2_a9_chan256.yaml`](../ablations/configs/r2_a9_chan256.yaml).
-Key hyperparameters:
+[`configs/config_model.yaml`](../configs/config_model.yaml) ships the paper's configuration, so it
+reproduces the main result unchanged. Key hyperparameters:
 
 | Group | Setting |
 |---|---|
@@ -32,7 +32,7 @@ Key hyperparameters:
 Train and evaluate it:
 
 ```bash
-python run.py --config_atlas ablations/configs/r2_a9_chan256.yaml
+python run.py
 python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
     --holdout_strategy leave_one_out --test on
 ```
@@ -47,19 +47,18 @@ table.
 - **Scenario 2 (full history):** adapt the eye's latent on all available past visits (TTA), then
   forecast. Use `evaluate.py --support_k K` to fit on the first `K` visits and predict the rest.
 
-## 2. Ablations
+## 2. Changing the model
 
-The ablation suite reproduces the paper's ablation tables — each ablation is the same short-training
-reference config with exactly one knob changed. See [`../ablations/README.md`](../ablations/README.md):
+Every architectural knob is documented in `configs/config_model.yaml` and in the README's model
+architecture options. Change one at a time, either in a copy of the config or on the command line:
 
 ```bash
-python ablations/make_configs.py                     # (re)generate the configs
-python ablations/run_ablations.py                    # train + evaluate every ablation
-python ablations/compare_ablations.py                # one comparison table (test set)
+python run.py --inr_decoder__latent_dim "[64, 32, 32]"   # smaller latent grid
+python run.py --inr_decoder__shared_output_layer true    # one shared output head
+python run.py --config_model path/to/your_config.yaml
 ```
 
-The latent-grid channel × spatial sweep (from which `r2_a9_chan256` is the winner) is regenerated with
-`ablations/make_configs.py` and summarized by `ablations/plot_grid_metric_row.py`.
+Select on the validation leave-one-out metric, not on test.
 
 ## 3. Baselines
 

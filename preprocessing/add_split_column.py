@@ -1,6 +1,6 @@
 """Assign a patient-wise train / val / test split to the FAF-GA metadata CSV.
 
-Design (see also _run_validation_round in build_atlas.py):
+Design (see also _run_validation_round in build_model.py):
   * train     -> fit the INR decoder + training latents.
   * val        -> further split at optimisation time into:
                     - val-opt:  visits used to fit each val patient-eye's latent,

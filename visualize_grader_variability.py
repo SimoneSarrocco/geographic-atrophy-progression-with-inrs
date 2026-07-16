@@ -220,11 +220,11 @@ def main():
     args_cli = parser.parse_args()
     
     # Load configs
-    with open('./configs/config_atlas.yaml', 'r') as f:
-        args_atlas = yaml.safe_load(f)
+    with open('./configs/config_model.yaml', 'r') as f:
+        args_model = yaml.safe_load(f)
     with open('./configs/config_data.yaml', 'r') as f:
         args_data = {'dataset': yaml.safe_load(f)['faf_ga']}
-    args = {**args_data, **args_atlas}
+    args = {**args_data, **args_model}
     
     # Initialize full FAF-GA dataset using df_loaded to avoid splitting/filtering out visits
     print("Loading FAF-GA dataset metadata...")

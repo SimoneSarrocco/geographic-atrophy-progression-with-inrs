@@ -20,7 +20,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-from build_atlas import AtlasBuilder
+from build_model import ModelBuilder
 from utils import generate_world_grid, typecheck_img, load_2d_modality
 
 
@@ -44,7 +44,7 @@ def main():
                                        f"faf_seg_alignment_{args_cmd.split}_ep{epoch}.png")
     args["output_dir"] = os.path.dirname(out)
 
-    b = AtlasBuilder(args)
+    b = ModelBuilder(args)
     split = args_cmd.split
     gc, gs = generate_world_grid(args, device=b.device)
     df = b.datasets[split].df
@@ -83,7 +83,7 @@ def main():
         pred_faf = np.clip(pred[..., 0], 0, 1)
         pred_seg = (pred[..., sr_dims] > 0.5).astype(np.float32)
 
-        # GT, center-cropped to pred shape (mirrors build_atlas figure alignment)
+        # GT, center-cropped to pred shape (mirrors build_model figure alignment)
         gt_faf = load_2d_modality(b.datasets[split].resolve_path(row, mods[0]), is_seg=False,
                                   patient_stats=b._get_patient_stats(split, sub_id), args=b.args)
         gt_seg = load_2d_modality(b.datasets[split].resolve_path(row, mods[1]), is_seg=True,

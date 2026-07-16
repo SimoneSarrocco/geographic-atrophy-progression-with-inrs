@@ -15,11 +15,8 @@ from tqdm import tqdm
 from datetime import datetime
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
-from sklearn.neighbors import KNeighborsClassifier, NeighborhoodComponentsAnalysis
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
 from torch.amp.grad_scaler import GradScaler
-from models.inr_decoder import INR_Decoder, LatentRegressor
+from models.inr_decoder import INR_Decoder
 from data_loading.dataset import Data
 from utils import *
 from utils import _seg_change_map, _signed_diff_map, _seg_tpfpfn_map
@@ -55,9 +52,9 @@ class _GatedImageWriter:
         return getattr(object.__getattribute__(self, '_writer'), name)
 
 
-class AtlasBuilder:
+class ModelBuilder:
     """
-    Class to build an atlas from a training dataset.
+    Trains the conditional INR on a longitudinal cohort and runs validation, test and test-time adaptation.
     """
 
     def __init__(self, args):
@@ -73,7 +70,7 @@ class AtlasBuilder:
         self.time_as_input = self.args['inr_decoder'].get('time_as_input', False)
         self._temporal_key = self._get_temporal_key()
         self.reconstruction_cache = {}
-        self._init_atlas_training()
+        self._init_training()
         self.global_steps = {'train': 0, 'val': 0}
         self.global_val_steps_monotonic = 0
         # Anchor tensors for the TTA latent regulariser (set per split in _init_validation):
@@ -114,7 +111,7 @@ class AtlasBuilder:
                          "Please specify 'temporal_condition' or enable at least one condition.")
 
 
-    # Add this to AtlasBuilder in build_atlas.py
+    # Add this to ModelBuilder in build_model.py
 
     def create_subset_dataloader(self, split, indices):
         """Creates a DataLoader for a subset of the dataset specified by indices."""
@@ -633,7 +630,7 @@ class AtlasBuilder:
     def validate(self, epoch_train):
         """
         Validate the model on the validation set, including:
-        - optionally generate atlas and save to disk
+        - optionally generate conditioned renders and save to disk
         - generate training subjects (top 5) and compute eval metrics
         - generate validation subjects (top 3) and compute eval metrics
         - analyze latent space to predict attributes
@@ -657,8 +654,8 @@ class AtlasBuilder:
         tb_writer = self.args.get('tb_writer', None)
         grid_coords, grid_shape = generate_world_grid(self.args, device=self.device)
 
-        if is_val_epoch and self.args['generate_cond_atlas']:
-            self.generate_atlas(epoch_train, n_max=100)
+        if is_val_epoch and self.args['generate_cond_renders']:
+            self.generate_renders(epoch_train, n_max=100)
 
         if is_train_eval_epoch:
             # Training evaluation: first 3 REAL patient-eyes only (never pseudo-eye augmentations,
@@ -1460,7 +1457,7 @@ class AtlasBuilder:
                     })
                     
                 # Future offsets for extrapolation
-                offsets_weeks = self.args['atlas_gen'].get('future_offsets_weeks', [12, 24, 48])
+                offsets_weeks = self.args['model_gen'].get('future_offsets_weeks', [12, 24, 48])
                 last_week = actual_weeks[-1]
                 pred_weeks_ext = [last_week + offset for offset in offsets_weeks]
                 
@@ -1773,8 +1770,6 @@ class AtlasBuilder:
         for epoch_val in range(0 if _loaded_frozen else self.args['epochs']['val']):
             _, loss_components = self.train_epoch(split=split, epoch=epoch_val, epoch_train=epoch_train, sub_writer=sub_writer)
             self._update_scheduler(split=split)
-            if split == 'val':
-                self.analyze_latent_space(epoch_train, epoch_val)
             opt_dice = self._log_inner_val_convergence(epoch_train, epoch_val, picked_val_subs, opt_idcs, eval_idcs, grid_coords, grid_shape, split=split, tag_suffix=tag_suffix)
             last_val_loss_components = loss_components
 
@@ -2594,7 +2589,7 @@ class AtlasBuilder:
 
         # Retrieve offset weeks configurations
         if future:
-            offsets_weeks = self.args['atlas_gen'].get('future_offsets_weeks', [26, 52, 78])
+            offsets_weeks = self.args['model_gen'].get('future_offsets_weeks', [26, 52, 78])
 
         for sub_id in subject_ids:
             sub_df = df[df['sub_id_int'] == sub_id]
@@ -2759,32 +2754,32 @@ class AtlasBuilder:
 
 
 
-    def generate_atlas(self, epoch=0, n_max=100):
+    def generate_renders(self, epoch=0, n_max=100):
         """
-        Generate temporal atlas for each condition combination in self.args['atlas_gen']['conditions'].
+        Generate a render for each condition combination in self.args['model_gen']['conditions'].
         """
-        print(f"Generating atlases (depending on resolution and number of atlases this may take some time) ...\n")
+        print(f"Generating renders (depending on resolution and count this may take some time) ...\n")
         self.inr_decoder['train'].eval()
         grid_coords, grid_shape = generate_world_grid(self.args, device=self.device)
-        temp_steps = self.args['atlas_gen']['temporal_values']
+        temp_steps = self.args['model_gen']['temporal_values']
         sr_dims = sum(self.args['inr_decoder']['out_dim'][:-1])
         n_seg_channels = self.args['inr_decoder']['out_dim'][-1]
         has_seg = n_seg_channels > 0
-        # Atlas expects num_modalities channels = [intensity..., seg_argmax]
+        # Rendering expects num_modalities channels = [intensity..., seg_argmax]
         # But inference() now returns [imgs(sr_dims), seg_hard(1), seg_soft(n_seg_channels)]
         # We need to extract [imgs, seg_hard] = sr_dims + 1 channels
-        atlas_list = []
+        render_list = []
         with torch.no_grad():
             temporal_key = self._temporal_key
             for temp_step in temp_steps:
                 temp_step_normed = normalize_condition(self.args, temporal_key, temp_step)
                 mean_latent = self.get_mean_latent(temporal_key, temp_step_normed, n_max=n_max)
-                condition_vectors = generate_combinations(self.args, self.args['atlas_gen']['conditions'])
+                condition_vectors = generate_combinations(self.args, self.args['model_gen']['conditions'])
                 cond_list = []
                 for c_v in condition_vectors:
                     time_as_input = self.args['inr_decoder'].get('time_as_input', False)
                     if time_as_input:
-                        keys = list(self.args['atlas_gen']['conditions'].keys())
+                        keys = list(self.args['model_gen']['conditions'].keys())
                         if temporal_key in keys:
                             temp_idx = keys.index(temporal_key)
                             t_val = c_v[temp_idx]
@@ -2801,7 +2796,7 @@ class AtlasBuilder:
                     
                     values_p = self.inr_decoder['train'].inference(grid_coords, mean_latent, c_v_tensor,
                                                                    grid_shape, None, time_val=t_val_tensor)
-                    # Extract only [imgs, seg_hard] for atlas (discard seg_soft channels)
+                    # Extract only [imgs, seg_hard] for rendering (discard seg_soft channels)
                     if has_seg:
                         imgs = values_p[..., :sr_dims]
                         seg_hard = values_p[..., sr_dims:sr_dims + 1]  # argmax channel
@@ -2811,11 +2806,11 @@ class AtlasBuilder:
                     cond_list.append(values_p.detach().cpu())
                     torch.cuda.empty_cache()
 
-                atlas_list.append(torch.stack(cond_list, dim=-1))
-        atlas_list = torch.stack(atlas_list, dim=-1)  # [*spatial, num_modalities, num_conditions, t]
-        save_atlas(self.args, atlas_list, temp_steps, condition_vectors, epoch=epoch,
+                render_list.append(torch.stack(cond_list, dim=-1))
+        render_list = torch.stack(render_list, dim=-1)  # [*spatial, num_modalities, num_conditions, t]
+        save_renders(self.args, render_list, temp_steps, condition_vectors, epoch=epoch,
                    tb_writer=self.args.get('tb_writer', None))
-        return atlas_list
+        return render_list
 
     def get_mean_latent(self, condition_key, condition_mean, n_max=100, split='train'):
         """
@@ -2833,9 +2828,9 @@ class AtlasBuilder:
         """
         c_ratio = 2 / (self.args['dataset']['constraints'][condition_key]['max'] -
                        self.args['dataset']['constraints'][condition_key]['min'])
-        span_weeks = self.args['atlas_gen']['gaussian_span']
+        span_weeks = self.args['model_gen']['gaussian_span']
         sigma = 0.5 * span_weeks * c_ratio
-        sigma = sigma * self.args['atlas_gen']['cond_scale']
+        sigma = sigma * self.args['model_gen']['cond_scale']
 
         latents = self.latents[split]
         # Expand latents to visit-level: each visit gets its patient-eye's latent
@@ -2854,146 +2849,6 @@ class AtlasBuilder:
         weights = weights.view(*view_shape)
         mean_latent = torch.sum(expanded_latents * weights, dim=0, keepdim=True)
         return mean_latent
-
-    def analyze_latent_space(self, epoch, epoch_val=0):
-        args_LA = self.args['latent_anaylsis']
-        args_C = self.args['dataset']['conditions']
-        if not args_LA['activate']: return  # skip if not activated in config
-        # conduct latent space analysis including
-        # - birth age prediction from condition
-        # - scan age prediction from latent_code
-        if args_LA['predict_ext_condition'] != 'none':
-            if args_C['lesion_size'] and args_LA['predict_ext_condition'] == 'MAE':
-                self.predict_ext_condition('lesion_size', epoch, epoch_val)
-            elif args_C['sex'] and args_LA['predict_ext_condition'] == 'CrossEntropy':
-                self.predict_ext_condition('sex', epoch, epoch_val)
-
-        if args_LA['predict_age_at_visit'] != 'none':
-            self.predict_cond_value(epoch, epoch_val, cond_key='AgeatVisit')
-        if args_LA['predict_birth_age'] != 'none':
-            self.predict_cond_value(epoch, epoch_val, cond_key='birth_age')
-        if args_LA['ba_regression']['activate']:
-            self.regress_latent_condition('AgeatConsent', epoch, epoch_val)
-
-    def predict_cond_value(self, epoch, epoch_val=0, k=5, cond_key='AgeatVisit'):
-        # Predict scan_age using either NCA, PCA, SVR
-        # 1. train regression network on training latents
-        # 2. after each epoch, compute regression on validation latents
-        # 3. compute metrics
-        # 4. log metrics
-        # Expand latents to visit-level for pairing with per-visit condition labels
-        sub_id_map_train = self.datasets['train'].sub_id_map
-        train_data = self.latents['train'].detach().cpu().clone().numpy()[sub_id_map_train]
-        train_data = train_data.reshape(train_data.shape[0], -1)
-        train_labels = self.datasets['train'].get_condition_values(cond_key, normed=False, device=self.device)[
-            0].cpu().numpy()
-        train_labels_rnd = np.round(train_labels).astype(int)
-        sub_id_map_val = self.datasets['val'].sub_id_map
-        val_data = self.latents['val'].detach().cpu().clone().numpy()[sub_id_map_val]
-        val_data = val_data.reshape(val_data.shape[0], -1)
-        val_labels = self.datasets['val'].get_condition_values(cond_key, normed=False, device=self.device)[
-            0].cpu().numpy()
-        val_labels_rnd = np.round(val_labels).astype(int)
-
-        nca = make_pipeline(StandardScaler(), NeighborhoodComponentsAnalysis(n_components=2, random_state=1927))
-        knn = KNeighborsClassifier(n_neighbors=min(min(len(self.latents['val']), len(self.latents['train'])), k))
-        nca.fit(train_data, train_labels_rnd)
-        knn.fit(nca.transform(train_data), train_labels_rnd)
-        nca_predictions = knn.predict(nca.transform(val_data))
-        nca_acc = np.mean(np.abs(nca_predictions - val_labels_rnd))
-        nca_std = np.std(np.abs(nca_predictions - val_labels_rnd))
-
-        print(
-            f"Epoch_train {epoch}, Epoch_val {epoch_val}: Accuracy of NCA classifier for {cond_key}: {nca_acc:.3f} +/- {nca_std:.3f}")
-        if self.args['logging']:
-            wd.log({f'latent_anaylsis/{cond_key}_accuracy_nca': nca_acc})
-
-
-    def predict_ext_condition(self, condition_key, epoch, epoch_val=0):
-        # retrieve ground truth
-        tb_writer = self.args.get('tb_writer', None)
-        condition_values, df_idcs = self.datasets['val'].get_condition_values(condition_key, normed=False,
-                                                                              device=self.device)
-        cond_idx = list(self.args['atlas_gen']['conditions'].keys()).index(condition_key)
-        # Expand conditions_val to visit-level
-        sub_id_map = self.datasets['val'].sub_id_map
-        condition_predictions = self.conditions_val[sub_id_map][:, cond_idx]
-        condition_predictions = denormalize_conditions(self.args, condition_key, condition_predictions)
-        # compute metrics
-        if self.args['latent_anaylsis']['predict_ext_condition'] == 'MAE':
-            mae = torch.mean(torch.abs(condition_predictions - condition_values))
-            value = mae.item()
-            print(f"MAE for {condition_key}: {mae:.3f} at epoch {epoch}, epoch_val {epoch_val}")
-        elif self.args['latent_anaylsis']['predict_ext_condition'] == 'CrossEntropy':
-            ce = torch.nn.functional.cross_entropy(condition_predictions, condition_values)
-            value = ce.item()
-            print(f"Cross entropy for {condition_key}: {ce:.3f} at epoch {epoch}, epoch_val {epoch_val}")
-        else:
-            raise ValueError(f"Unknown metric {self.args['latent_anaylsis']['predict_ext_condition']}")
-        if self.args['logging']:
-            wd.log({f"latent_anaylsis/{condition_key}": value})
-            tb_writer.add_scalar(f"latent_analysis/{condition_key}", value, epoch*self.args['epochs']['val']+epoch_val)
-
-    def regress_latent_condition(self, condition_key, epoch_train=0, epoch_val=0):
-        # 1. train regression network on training latents
-        # 2. after each epoch, compute regression on validation latents
-        # 3. compute metrics
-        # 4. log metrics
-        # Expand latents to visit-level for pairing with per-visit condition labels
-        sub_id_map_train = self.datasets['train'].sub_id_map
-        train_data = self.latents['train'].detach().clone()[sub_id_map_train]
-        train_labels = self.datasets['train'].get_condition_values(condition_key, normed=True, device=self.device)[0]
-        sub_id_map_val = self.datasets['val'].sub_id_map
-        val_data = self.latents['val'].detach().clone()[sub_id_map_val]
-        val_labels = self.datasets['val'].get_condition_values(condition_key, normed=True, device=self.device)[0]
-        regressor = LatentRegressor(self.args['inr_decoder']['latent_dim']).to(self.device)
-        optimizer = optim.AdamW(regressor.parameters(), lr=self.args['latent_anaylsis']['ba_regression']['lr'],
-                                weight_decay=0.0)
-        batch_size = 32
-        loss_fnc = torch.nn.L1Loss()
-        regressor.train()
-        regression_epochs = self.args['latent_anaylsis']['ba_regression']['epochs']
-        best_score_val = float('inf')
-        best_score_val_epoch = 0
-        for epoch in range(regression_epochs):
-            shuffle = np.random.permutation(len(train_data))
-            train_data_sh = train_data[shuffle]
-            train_labels_sh = train_labels[shuffle]
-            loss_train_epoch = []
-            for i in range(0, len(train_data_sh), batch_size):
-                train_data_batch = train_data_sh[i:i + batch_size]
-                train_labels_batch = train_labels_sh[i:i + batch_size]
-                optimizer.zero_grad()
-                pred_train = regressor(train_data_batch.squeeze()).squeeze()
-                loss_train = loss_fnc(pred_train, train_labels_batch)
-                loss_train.backward()
-                optimizer.step()
-                loss_train_epoch.append(loss_train.item())
-            if epoch % 1 == 0:
-                print(f"Epoch {epoch} - Loss: {np.mean(loss_train_epoch):.4f}")
-                # 2. validate regression network on validation latents
-                regressor.eval()
-                with torch.no_grad():
-                    pred_val = regressor(val_data.squeeze())
-                    loss_val = loss_fnc(pred_val, val_labels)
-                    print(f"Validation Loss: {loss_val.item():.4f}")
-                    # compute metrics
-                    pred_val_denormed = denormalize_conditions(self.args, condition_key, pred_val)
-                    val_labels_denormed = denormalize_conditions(self.args, condition_key, val_labels)
-                    mae = torch.mean(torch.abs(pred_val_denormed - val_labels_denormed))
-                    print(f"MAE for {condition_key}: {mae:.3f} at epoch {epoch_train}, epoch_val {epoch_val}\n")
-                    if mae < best_score_val:
-                        best_score_val = mae
-                        best_score_val_epoch = epoch
-                    # log metrics
-                if self.args['logging']:
-                    wd.log({f"latent_anaylsis/{condition_key}_regression_train": loss_train.item()})
-                    wd.log({f"latent_anaylsis/{condition_key}_regression_val": loss_val.item()})
-                    wd.log({f"latent_anaylsis/{condition_key}_regression_mae_val": mae.item()})
-                regressor.train()
-        print(
-            f"Best MAE for {condition_key}: {best_score_val:.3f} at regression_epoch {best_score_val_epoch} for epoch_train {epoch_train}, epoch_val {epoch_val}")
-
 
     def save_state(self, epoch, split='train', filename=None):
         """Save a checkpoint. By default writes 'checkpoint_epoch_{epoch}.pth'; pass `filename`
@@ -3030,14 +2885,11 @@ class AtlasBuilder:
         # self._init_transformations(chkp['transformations'])
         self._init_latents(chkp['latents'])
 
-        self.latent_transition_model = None
-
         print(f'Loaded state from {chkp_path}')
 
-    def _init_atlas_training(self):
+    def _init_training(self):
         self.datasets, self.dataloaders = {}, {}
         self.inr_decoder, self.latents, self.transformations = {}, {}, {}
-        self.latent_transition_model = None
         self.optimizers, self.grad_scalers = {}, {}
         self.schedulers = {}
         chkp_path = self.args['load_model']['path']
@@ -3302,7 +3154,7 @@ class AtlasBuilder:
         constraints = self.args['dataset'].get('constraints', {}).get(temporal_key, {})
         c_min = constraints.get('min', 0.0)
         c_max = constraints.get('max', 1.0)
-        cond_scale = self.args.get('atlas_gen', {}).get('cond_scale', 1.0)
+        cond_scale = self.args.get('model_gen', {}).get('cond_scale', 1.0)
 
         # Sweep slightly beyond [-1, 1] to also probe extrapolation (future visits).
         norm_grid = np.linspace(-1.0, 1.3, n_steps)

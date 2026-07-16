@@ -60,7 +60,7 @@ class INR_Decoder(nn.Module):
         # v2 (gated): per-coordinate ANCHOR inputs (last-observed FAF + baseline mask) fed as
         # extra SIREN inputs to ground prediction in anatomy / exploit perilesional FAF.
         # When faf_as_input is False, n_anchor=0 and behaviour is IDENTICAL to before.
-        # anchor_grids (N, n_anchor, H, W) is populated by build_atlas after the latent bank
+        # anchor_grids (N, n_anchor, H, W) is populated by build_model after the latent bank
         # is sized; it is sampled per-coordinate in forward() via _interpolate_latents.
         self.faf_as_input = args_inr.get('faf_as_input', False)
         self.n_anchor = 2 if self.faf_as_input else 0
@@ -461,24 +461,3 @@ class Modulator(nn.Module):
 
     def forward(self, latent_vecs):
         return self.conv(latent_vecs)
-
-
-class LatentRegressor(nn.Module):
-    """
-    Latent regressor to regress information from the latent vector, e.g., birth_age.
-    """
-
-    def __init__(self, latent_dims):
-        super().__init__()
-        self.sequence = nn.Sequential(
-            nn.Linear(latent_dims[0], 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-        )
-
-    def forward(self, latent_vecs):
-        return self.sequence(latent_vecs)
-
-

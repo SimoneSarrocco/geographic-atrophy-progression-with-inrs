@@ -7,7 +7,6 @@ torchaudio
 numpy>=1.22
 scipy>=1.10
 pandas>=1.5
-scikit-learn>=1.0
 scikit-image>=0.20
 
 # Experiment Tracking and Logging

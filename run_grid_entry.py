@@ -7,7 +7,7 @@ import wandb as wd
 from torch.utils.tensorboard import SummaryWriter
 
 # GAP-INR imports
-from build_atlas import AtlasBuilder
+from build_model import ModelBuilder
 from download_lakefs_data import download_dataset
 from run import override_args
 
@@ -16,22 +16,22 @@ os.environ["WANDB__SERVICE_WAIT"] = "500"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="GAP-INR Grid Search Run Entry")
-    parser.add_argument("--config-atlas", type=str, required=True, help="Path to config_atlas.yaml")
+    parser.add_argument("--config-model", type=str, required=True, help="Path to config_model.yaml")
     parser.add_argument("--config-data", type=str, required=True, help="Path to config_data.yaml")
     return parser.parse_args()
 
 
-def initial_setup(config_atlas_path, config_data_path):
+def initial_setup(config_model_path, config_data_path):
     # Load specific configurations passed to the script
-    with open(config_atlas_path, 'r') as stream:
-        args_atlas = yaml.safe_load(stream)
+    with open(config_model_path, 'r') as stream:
+        args_model = yaml.safe_load(stream)
         
-    config_name = args_atlas.get('config_data', 'faf_ga')
+    config_name = args_model.get('config_data', 'faf_ga')
     
     with open(config_data_path, 'r') as stream:
         args_data = {'dataset': yaml.safe_load(stream)[config_name]}
         
-    args = {**args_data, **args_atlas}
+    args = {**args_data, **args_model}
     
     # Resolve subject ids path (relative vs absolute)
     subject_ids_path = args['dataset']['subject_ids']
@@ -58,8 +58,8 @@ def initial_setup(config_atlas_path, config_data_path):
     # Save copy of current configs to output directory
     with open(os.path.join(args['output_dir'], 'config_data.yaml'), 'w') as f:
         yaml.dump(args_data, f)
-    with open(os.path.join(args['output_dir'], 'config_atlas.yaml'), 'w') as f:
-        yaml.dump(args_atlas, f)
+    with open(os.path.join(args['output_dir'], 'config_model.yaml'), 'w') as f:
+        yaml.dump(args_model, f)
     print(f"Saved config files to {args['output_dir']}")
 
     has_seg = args['inr_decoder']['out_dim'][-1] > 0
@@ -68,12 +68,12 @@ def initial_setup(config_atlas_path, config_data_path):
         print(f"WARNING: The number of output dimensions ({args['inr_decoder']['out_dim'][0]}) " 
               f"might not match the number of intensity modalities ({expected_sr_mods}).")
               
-    if args['atlas_gen']['conditions'] is not None:
-        for key in list(args['atlas_gen']['conditions'].keys()):
+    if args['model_gen']['conditions'] is not None:
+        for key in list(args['model_gen']['conditions'].keys()):
             if not args['dataset']['conditions'][key]:
-                print(f"WARNING: The atlas condition {key} is not set True in the dataset config. "
-                      f"Turning off the atlas generation for {key}.")
-                args['atlas_gen']['conditions'].pop(key)
+                print(f"WARNING: The render condition {key} is not set True in the dataset config. "
+                      f"Turning off the render generation for {key}.")
+                args['model_gen']['conditions'].pop(key)
 
     # Initialize Weights & Biases if logging is enabled
     run_name = os.path.basename(args['output_dir'])
@@ -91,12 +91,12 @@ def initial_setup(config_atlas_path, config_data_path):
 
 def main():
     cmd_args = parse_args()
-    args = initial_setup(cmd_args.config_atlas, cmd_args.config_data)
+    args = initial_setup(cmd_args.config_model, cmd_args.config_data)
     print("INR Decoder parameters:")
     print(args['inr_decoder'])
     
-    # Run the AtlasBuilder
-    atlas_builder = AtlasBuilder(args)
+    # Run the ModelBuilder
+    model_builder = ModelBuilder(args)
     
     # Close TensorBoard writer
     if 'tb_writer' in args and args['tb_writer'] is not None:

@@ -1,6 +1,6 @@
 """Multi-patient GA-area trajectory figures for the GAP-INR paper.
 
-Reads a ``lesion_areas{label}_epoch_{N}.csv`` produced by build_atlas
+Reads a ``lesion_areas{label}_epoch_{N}.csv`` produced by build_model
 (analyze_and_plot_lesion_sizes) and renders, for one split (test by default):
 
   1. OVERLAY  -- all eyes on one GA-area(mm^2)-vs-weeks axes, GT = markers,

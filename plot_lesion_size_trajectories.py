@@ -7,7 +7,7 @@ interpolation, purple=new extrapolation). Ground truth is a black line with fill
 continuous estimate is a smooth crimson line. A shaded band marks the extrapolated (future) region.
 
 Inputs:
-  --csv      lesion_areas{label}_epoch_{N}.csv  (build_atlas): cols Patient_Eye, Set
+  --csv      lesion_areas{label}_epoch_{N}.csv  (build_model): cols Patient_Eye, Set
              ({split}_opt | {split}_eval), Weeks, GT_Area_mm2, Pred_Area_mm2, Dice.
   --new-csv  OPTIONAL new-time-point predictions: cols Patient_Eye, Weeks, Pred_Area_mm2,
              Kind ({interp|extrap}).
@@ -85,7 +85,7 @@ def _per_eye(df, split):
 def _per_eye_holdout(holdout_dir, df, split):
     """Like _per_eye, but each existing visit's predicted area is the LEAVE-ONE-OUT prediction obtained
     when THAT visit was held out and the latent optimised on all the OTHER visits (the genuine per-visit
-    Scenario-2 score) -- read from build_atlas' holdout_timeline_arrays/<eye>.npz. Weeks + GT come from
+    Scenario-2 score) -- read from build_model' holdout_timeline_arrays/<eye>.npz. Weeks + GT come from
     the CSV; only the predictions are overridden. Visits are matched chronologically (both sorted by
     time) and cross-checked on GT area. Only the LAST visit is flagged held-out (=> star / forecast)."""
     base = _per_eye(df, split)
@@ -214,7 +214,7 @@ def main():
     ap.add_argument("--csv", required=True)
     ap.add_argument("--split", default="test")
     ap.add_argument("--holdout-dir", default=None,
-                    help="build_atlas holdout_timeline_arrays dir. If given, each existing visit's "
+                    help="build_model holdout_timeline_arrays dir. If given, each existing visit's "
                          "predicted area is the LEAVE-ONE-OUT prediction (that visit held out, latent "
                          "optimised on the others) instead of the in-sample reconstruction from --csv.")
     ap.add_argument("--new-csv", default=None)

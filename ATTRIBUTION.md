@@ -9,8 +9,8 @@ The contribution of the accompanying paper is the adaptation of the framework to
 geographic-atrophy forecasting from fundus autofluorescence imaging: the 2-D retinal data pipeline
 and preprocessing, the joint FAF-reconstruction and GA-segmentation heads, the temporal
 (weeks-from-baseline) conditioning and test-time latent
-adaptation for future-visit prediction, the leave-one-out interpolation/extrapolation evaluation, the
-ablation suite, and the comparison protocol.
+adaptation for future-visit prediction, the leave-one-out interpolation/extrapolation evaluation, and
+the comparison protocol.
 
 ## Upstream framework
 

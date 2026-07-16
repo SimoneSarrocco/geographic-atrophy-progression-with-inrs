@@ -7,7 +7,7 @@
 #
 #   ./run_pipeline.sh                         # full pipeline, auto GPU, default config
 #   ./run_pipeline.sh --gpu 3                 # force a specific GPU
-#   ./run_pipeline.sh --config_atlas configs/config_atlas.yaml
+#   ./run_pipeline.sh --config_model configs/config_model.yaml
 #   ./run_pipeline.sh --skip-train --run tmp/omega_20260624_204828_loc   # eval+diag only
 #   ./run_pipeline.sh --stages train,eval     # subset of stages (train,eval,tsens,traj)
 #
@@ -25,7 +25,7 @@ cd "$HERE"
 
 GPU=""
 RUN_DIR=""
-CONFIG_ATLAS="configs/config_atlas.yaml"
+CONFIG_MODEL="configs/config_model.yaml"
 STAGES="train,eval,tsens,traj"
 SKIP_TRAIN=0
 EPOCHS_VAL=""          # optional override for eval/tsens TTA epochs
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --gpu) GPU="$2"; shift 2;;
     --run) RUN_DIR="$2"; shift 2;;
-    --config_atlas) CONFIG_ATLAS="$2"; shift 2;;
+    --config_model) CONFIG_MODEL="$2"; shift 2;;
     --stages) STAGES="$2"; shift 2;;
     --skip-train) SKIP_TRAIN=1; STAGES="${STAGES/train,/}"; shift;;
     --epochs_val) EPOCHS_VAL="$2"; shift 2;;
@@ -60,7 +60,7 @@ if has_stage train && [[ "$SKIP_TRAIN" -eq 0 ]]; then
   echo; echo "================ STAGE: TRAIN ================"
   # run.py timestamps its own output dir under output_dir/. Capture it from the log.
   TRAIN_LOG="$(mktemp)"
-  $PY run.py --config_atlas "$CONFIG_ATLAS" 2>&1 | tee "$TRAIN_LOG"
+  $PY run.py --config_model "$CONFIG_MODEL" 2>&1 | tee "$TRAIN_LOG"
   RUN_DIR=$(grep -oE "Output directory: .*" "$TRAIN_LOG" | tail -1 | sed 's/Output directory: //')
   echo "==> Train run dir: $RUN_DIR"
 fi

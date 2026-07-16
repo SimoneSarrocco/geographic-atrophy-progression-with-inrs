@@ -82,13 +82,13 @@ def build_grid():
 # ─────────────────────────────────────────────────────────────────────────────
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-CONFIG_ATLAS_PATH = os.path.join(REPO_ROOT, 'configs', 'config_atlas.yaml')
+CONFIG_MODEL_PATH = os.path.join(REPO_ROOT, 'configs', 'config_model.yaml')
 CONFIG_DATA_PATH = os.path.join(REPO_ROOT, 'configs', 'config_data.yaml')
 
 
 def load_base_config():
-    """Load and return a deep copy of the base atlas config."""
-    with open(CONFIG_ATLAS_PATH, 'r') as f:
+    """Load and return a deep copy of the base model config."""
+    with open(CONFIG_MODEL_PATH, 'r') as f:
         return yaml.safe_load(f)
 
 
@@ -111,7 +111,7 @@ def apply_omega_config(base_config, grid_entry, output_root):
 def write_run_config(cfg, run_dir):
     """Write the modified config to a run-specific directory. Returns the config path."""
     os.makedirs(run_dir, exist_ok=True)
-    config_path = os.path.join(run_dir, 'config_atlas.yaml')
+    config_path = os.path.join(run_dir, 'config_model.yaml')
     with open(config_path, 'w') as f:
         yaml.dump(cfg, f, default_flow_style=False)
     return config_path
@@ -143,7 +143,7 @@ def run_single(grid_entry, output_root, base_config):
     # Launch as subprocess using the grid search wrapper entry point
     cmd = [
         sys.executable, os.path.join(REPO_ROOT, 'run_grid_entry.py'),
-        '--config-atlas', config_path,
+        '--config-model', config_path,
         '--config-data', CONFIG_DATA_PATH,
     ]
 
@@ -205,7 +205,7 @@ echo "  Config: $CONFIG_PATH"
 echo "========================================"
 
 cd {REPO_ROOT}
-python run_grid_entry.py --config-atlas "$CONFIG_PATH" --config-data {CONFIG_DATA_PATH}
+python run_grid_entry.py --config-model "$CONFIG_PATH" --config-data {CONFIG_DATA_PATH}
 """
 
     slurm_path = os.path.join(output_root, 'submit_grid.sh')

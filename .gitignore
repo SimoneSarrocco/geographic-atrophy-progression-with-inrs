@@ -8,8 +8,6 @@ data/*
 !data/.gitkeep
 cache/
 runs/
-ablations/runs/
-ablations/runs_*/
 
 # --- Model checkpoints / arrays / large binaries ---
 *.pth

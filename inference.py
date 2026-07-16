@@ -2,11 +2,16 @@ import os
 import yaml
 import argparse
 import torch
-from build_atlas import AtlasBuilder
+from build_model import ModelBuilder
 from run import initial_setup, override_args
 
 def parse_inference_args():
-    parser = argparse.ArgumentParser(description="GAP-INR Standalone Inference")
+    parser = argparse.ArgumentParser(
+        description="GAP-INR Standalone Inference",
+        epilog="The model config must describe the same architecture the checkpoint was trained "
+               "with, otherwise the weights will not load. Pass --config_model <file> when the "
+               "checkpoint was not trained with configs/config_model.yaml; "
+               "verify_run_config.py --checkpoint <ckpt> prints what a checkpoint used.")
     parser.add_argument("--config_data", type=str, default="faf_ga", help="Dataset configuration")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint (.pth)")
     parser.add_argument("--n_subjects", type=int, default=10, help="Number of subjects to evaluate")
@@ -26,38 +31,45 @@ def parse_inference_args():
 
 def main():
     cmd_args = parse_inference_args()
-    
-    # 1. Load base config
-    with open('./configs/config_atlas.yaml', 'r') as stream:
-        args_atlas = yaml.safe_load(stream)
-    
-    # 2. Setup args (reuse run.py logic)
-    # We set epochs to 0 so AtlasBuilder doesn't start training
-    args_atlas['epochs']['train'] = 0
-    args_atlas['load_model']['path'] = cmd_args['checkpoint']
-    args_atlas['n_subjects'][cmd_args['split']] = cmd_args['n_subjects']
-    
-    # Merge and override
+
+    # These are inference-script options, not config keys: keep them out of the config override so
+    # they don't overwrite same-named config entries (n_subjects is a per-split dict in the config).
+    checkpoint = cmd_args.pop('checkpoint')
+    n_subjects = cmd_args.pop('n_subjects')
+    output_name = cmd_args.pop('output_name')
+    split = cmd_args.get('split', 'val')
+
     args = initial_setup(cmd_args)
-    
+
+    # The checkpoint carries the epoch it was written at; load_checkpoint() addresses it as
+    # <dir>/checkpoint_epoch_<epoch>.pth.
+    chkp = torch.load(checkpoint, map_location='cpu', weights_only=False)
+    chkp_dir = os.path.dirname(os.path.abspath(checkpoint))
+    args['load_model'] = {'path': chkp_dir, 'epoch': chkp['epoch']}
+    args['epochs']['train'] = 0          # load and evaluate, never train
+    args['validate_every'] = 1
+    args['validation']['activate'] = True
+    args['n_subjects'][split] = n_subjects
+    args['output_dir'] = os.path.join(chkp_dir, output_name)
+    os.makedirs(args['output_dir'], exist_ok=True)
+
     print(f"\n--- Starting GAP-INR Inference ---")
-    print(f"Checkpoint: {cmd_args['checkpoint']}")
-    print(f"Split: {cmd_args['split']}")
+    print(f"Checkpoint: {checkpoint} (epoch {chkp['epoch']})")
+    print(f"Split: {split}")
     print(f"Output: {args['output_dir']}")
     print(f"----------------------------------\n")
 
-    # 3. Initialize AtlasBuilder (will load weights automatically)
-    atlas_builder = AtlasBuilder(args)
-    
-    # 4. Run Validation (which performs latent optimization + metrics + prophecy)
-    # validate() expects epoch_train, we pass 0
+    # Initialize ModelBuilder (loads the weights via load_model)
+    model_builder = ModelBuilder(args)
+
+    # Run validation: latent optimization + metrics + future-visit prediction
     print("\nRunning evaluation pipeline...")
-    atlas_builder.validate(epoch_train=0)
-    
-    # 5. Generate Atlas if requested in config
-    if args.get('atlas_gen', {}).get('activate', False):
-        print("\nGenerating temporal atlas...")
-        atlas_builder.generate_atlas(epoch=0)
+    model_builder.validate(epoch_train=0)
+
+    # Generate conditioned renders if requested in config
+    if args.get('generate_cond_renders', False):
+        print("\nGenerating conditioned renders...")
+        model_builder.generate_renders(epoch=0)
 
     print(f"\nInference completed. Results saved to: {args['output_dir']}")
     

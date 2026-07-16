@@ -5,8 +5,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 
-# Import AtlasBuilder
-from build_atlas import AtlasBuilder
+# Import ModelBuilder
+from build_model import ModelBuilder
 from data_loading.dataset import validate_splits
 
 def parse_args():
@@ -280,7 +280,7 @@ def main():
     args["tb_writer"] = SummaryWriter(log_dir=tb_log_dir)
     print(f"TensorBoard log directory: {tb_log_dir}")
     
-    # Configure AtlasBuilder to load model and not run training
+    # Configure ModelBuilder to load model and not run training
     args["epochs"]["train"] = 0
     args["validate_every"] = 1
     args["load_model"] = {
@@ -292,14 +292,14 @@ def main():
     args["validation"]["activate"] = True
     
     print("\nInitializing model and data loading...")
-    # NB: if test.activate is set (e.g. via --support_k), test() runs inside AtlasBuilder.__init__.
-    atlas_builder = AtlasBuilder(args)
+    # NB: if test.activate is set (e.g. via --support_k), test() runs inside ModelBuilder.__init__.
+    model_builder = ModelBuilder(args)
 
     if args_cmd.skip_val:
         print("\n--skip_val set: skipping the validation routine.")
     else:
         print("\nRunning validation/evaluation routine...")
-        atlas_builder.validate(epoch_train=chkp_epoch)
+        model_builder.validate(epoch_train=chkp_epoch)
 
     # Paper-ready leave-one-out summary (held-out DICE/PSNR/SSIM/IoU mean±SE, interp vs
     # extrapolation, lesion-area MAE) from the metric JSONs just written.

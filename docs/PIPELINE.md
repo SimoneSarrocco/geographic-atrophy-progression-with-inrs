@@ -35,7 +35,7 @@ the test set leaks).
 ## Stage 1 — train (`run.py`)
 
 ```bash
-python run.py --config_atlas configs/config_atlas.yaml
+python run.py --config_model configs/config_model.yaml
 ```
 
 - `validate_splits()` runs first and aborts if train/val/test overlap or the split is inconsistent.

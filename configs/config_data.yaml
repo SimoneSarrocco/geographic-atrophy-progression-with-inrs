@@ -35,7 +35,7 @@ faf_ga: &faf_ga
   # Normalisation bounds set to the ACTUAL observed range across all patient-eyes (not arbitrary
   # padding). This makes training/interpolation use the full [-1,1] FiLM/time dynamic range. Real
   # visits are filtered to this range by check_constraints, and interpolation stays between in-range
-  # visits, so the ONLY inputs that can exceed [min,max] are extrapolated/atlas grid values — whose
+  # visits, so the ONLY inputs that can exceed [min,max] are extrapolated/render grid values — whose
   # behaviour is governed entirely by extrapolate_beyond_range below. AgeatVisit observed range
   # across the 148 visits is [66.0, 90.906229]; the constraint max is set to 91.0 so the eye that
   # DEFINES the maximum age (EYE31_OD V4 = 90.906229) is not clipped by check_constraints. A max
@@ -52,16 +52,16 @@ faf_ga: &faf_ga
   # AgeatVisit and the FiLM condition weeks_from_baseline). It is the ONLY clamp control: when the
   # decoder is fed a value outside the observed [min,max] it is clamped to the boundary UNLESS this
   # flag is true.
-  #   false -> clamp to [min,max]: extrapolated/atlas-grid predictions FREEZE at the last in-range
+  #   false -> clamp to [min,max]: extrapolated/render-grid predictions FREEZE at the last in-range
   #            appearance (safe; avoids periodic-SIREN saturation to black/white garbage).
   #   true  -> no clamp: the normalised inputs exceed |1| and the GA prediction keeps PROGRESSING
   #            past the training horizon. Affects the extrapolation generation paths
   #            (_generate_novel_visits future offsets, publication-figure future columns, the
-  #            continuous lesion trajectory) and the atlas/condition grids (utils.normalize_condition).
+  #            continuous lesion trajectory) and the render/condition grids (utils.normalize_condition).
   # Real-visit reconstruction/metrics are unaffected either way (already in-range via check_constraints).
   # NOTE: true is genuine out-of-distribution extrapolation for a periodic SIREN -- quality past the
   # horizon is not guaranteed; verify trajectories look monotone/plausible (the lesion monotonicity
-  # check is your guardrail) and shorten atlas_gen.future_offsets_weeks if they degrade.
+  # check is your guardrail) and shorten model_gen.future_offsets_weeks if they degrade.
   extrapolate_beyond_range: true
   weeks_constraint_from_dates: true    # derive weeks_from_baseline [min,max] from visit_date at load
   min_valid_visits_eval: 2             # val/test: drop eyes with fewer valid visits (LOO needs >=2)
@@ -137,8 +137,7 @@ faf_ga: &faf_ga
 # --- STAGE 1 of the per-visit-latent + latent-dynamics plan ---
 # Same as `faf_ga` but: (1) independent_visits true -> ONE latent per VISIT (latent bank
 # sized to len(df)), and (2) ALL conditions OFF so each per-visit latent must encode the
-# FULL visit state (no weeks-FiLM shortcut) -> a clean substrate for Stage 2 latent dynamics
-# (train_latent_transition.py reads weeks_from_baseline from the df, which is still computed).
+# FULL visit state (no weeks-FiLM shortcut). weeks_from_baseline is still computed in the df.
 faf_ga_indep:
   <<: *faf_ga
   independent_visits: true
@@ -149,7 +148,7 @@ faf_ga_indep:
     lesion_count: false
 
 # --- TIME-AS-INPUT variant: one latent per EYE (independent_visits false, inherited),
-# but weeks is fed as an INPUT COORDINATE (config_atlas time_as_input: true,
+# but weeks is fed as an INPUT COORDINATE (config_model time_as_input: true,
 # temporal_condition=weeks) instead of a FiLM condition. All FiLM conditions OFF so the
 # per-eye latent is PURE identity and time enters only through the SIREN coordinate.
 faf_ga_timeinput:
@@ -194,11 +193,10 @@ faf_ga_512:
   world_bbox: [512, 512]
   sampling_bbox: null
 
-# --- 620-crop variants for the ablation suite (same registration crop as faf_ga_620). ---
-# faf_ga_indep_620: ONE latent per VISIT (independent_visits) + all conditions OFF -> the
-# per-visit-latent representation ablation (A2). faf_ga_timeinput_620: one latent per EYE but
-# time enters as an INPUT COORDINATE (conditions OFF, config sets time_as_input/in_dim=3,
-# cond_dims=0) -> the FiLM-vs-time-input ablation (A1). Both inherit everything else from faf_ga.
+# --- 620-crop variants (same registration crop as faf_ga_620). ---
+# faf_ga_indep_620: ONE latent per VISIT (independent_visits) + all conditions OFF.
+# faf_ga_timeinput_620: one latent per EYE, but time enters as an INPUT COORDINATE (conditions OFF,
+# config sets time_as_input/in_dim=3, cond_dims=0). Both inherit everything else from faf_ga.
 faf_ga_indep_620:
   <<: *faf_ga
   independent_visits: true
@@ -220,9 +218,9 @@ faf_ga_timeinput_620:
   world_bbox: [620, 620]
   sampling_bbox: [620, 620]
 
-# --- 512 variants (crop 620 -> resize 512) for the ablation suite, so ablations run on the SAME
-# resolution as the F1/F2 comparison (paper requirement). Same as the *_620 ablation sections but
-# with crop_before_resize [620,620] + world_bbox [512,512] + sampling_bbox null (like faf_ga_512). ---
+# --- 512 variants (crop 620 -> resize 512), matching the resolution of the baseline comparison.
+# Same as the *_620 sections but with crop_before_resize [620,620] + world_bbox [512,512] +
+# sampling_bbox null (like faf_ga_512). ---
 faf_ga_indep_512:
   <<: *faf_ga
   independent_visits: true
@@ -247,9 +245,9 @@ faf_ga_timeinput_512:
   sampling_bbox: null
 
 # --- TWO-VARIABLE temporal sections (AgeatVisit + weeks_from_baseline). Both are ENABLED conditions;
-# `temporal_condition` picks which one is the time axis (and, when the ablation sets time_as_input:true,
+# `temporal_condition` picks which one is the time axis (and, when time_as_input is true,
 # the time-INPUT coordinate -> it is skipped from FiLM and the OTHER enabled condition becomes the FiLM
-# vector; cond_dims is auto-computed in build_atlas._init_inr). Both vars are complete (non-NaN) and
+# vector; cond_dims is auto-computed in build_model._init_inr). Both vars are complete (non-NaN) and
 # have constraints above, so no rows are dropped. ---
 # A) temporal axis = weeks_from_baseline. time_as_input:false -> BOTH FiLM (cond_dims=2);
 #    time_as_input:true -> weeks is the time INPUT, AgeatVisit is FiLM (cond_dims=1).

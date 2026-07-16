@@ -40,7 +40,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-from build_atlas import AtlasBuilder
+from build_model import ModelBuilder
 from utils import generate_world_grid, typecheck_img
 from data_loading.dataset import validate_splits
 
@@ -158,8 +158,13 @@ def main():
     args["output_dir"] = out_dir
 
     print("Initialising model / data ...")
-    builder = AtlasBuilder(args)
+    builder = ModelBuilder(args)
     grid_coords, grid_shape = generate_world_grid(args, device=builder.device)
+
+    # ModelBuilder builds the train and val datasets; the test one is built inside test(), which is
+    # switched off above, so build it here when probing the test split.
+    if a.split not in builder.datasets:
+        builder._init_dataloading(split=a.split)
 
     df = builder.datasets[a.split].df
     if df is None or len(df) == 0:

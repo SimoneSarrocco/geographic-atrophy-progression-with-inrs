@@ -285,12 +285,12 @@ def to_device(x, device='cuda'):
     
 
 def normalize_condition(args, condition_key, condition_values, cond_scale=None):
-    c_scale = args['atlas_gen']['cond_scale'] if cond_scale is None else cond_scale
+    c_scale = args['model_gen']['cond_scale'] if cond_scale is None else cond_scale
     c_min = args['dataset']['constraints'][condition_key]['min']
     c_max = args['dataset']['constraints'][condition_key]['max']
-    # Clamp out-of-range values to the observed [min,max] so atlas grids stay in-distribution
+    # Clamp out-of-range values to the observed [min,max] so render grids stay in-distribution
     # (boundary appearance) instead of saturating the SIREN. No-op when in range. Skipped when
-    # extrapolate_beyond_range is set, so atlas/condition grids may progress past the horizon
+    # extrapolate_beyond_range is set, so render/condition grids may progress past the horizon
     # (consistent with the novel-visit extrapolation path).
     if not args['dataset'].get('extrapolate_beyond_range', False):
         condition_values = np.clip(condition_values, c_min, c_max)
@@ -316,7 +316,7 @@ def generate_combinations(args_data, conditions, keys=None, idx=0, current=None,
         if not conditions[key]['normed_values']:
             value = normalize_condition(args_data, key, value)
         else:
-            value = value * args_data['atlas_gen']['cond_scale']
+            value = value * args_data['model_gen']['cond_scale']
         next_current = current + [value]
         if idx == len(keys) - 1:
             results.append(next_current)
@@ -328,7 +328,7 @@ def generate_combinations(args_data, conditions, keys=None, idx=0, current=None,
 
 def generate_world_grid(args, normed=True, device='cpu'):
     world_bbox = args['dataset']['world_bbox']
-    spacing = args['atlas_gen']['spacing']
+    spacing = args['model_gen']['spacing']
     sampling_bbox = args['dataset'].get('sampling_bbox')
     
     if len(world_bbox) == 3:
@@ -403,23 +403,21 @@ def generate_world_grid(args, normed=True, device='cpu'):
     return grid_coords, grid_shape  # , affine
 
 
-def save_atlas(args, atlas, affine, temp_steps, condition_vectors, epoch, tb_writer=None):
-    # atlas is of shape  (*spatial, num_modalities, n_conds, t)
+def save_renders(args, renders, temp_steps, condition_vectors, epoch, tb_writer=None):
+    # renders is of shape  (*spatial, num_modalities, n_conds, t)
     # where spatial is (x, y, z) or (x, y)
-    shape = atlas.shape
+    shape = renders.shape
     num_spatial = len(args['dataset']['world_bbox'])
     num_mods = shape[num_spatial]
     n_conds = shape[num_spatial + 1]
     t = shape[num_spatial + 2]
     is_2d = (num_spatial == 2)
     
-    if isinstance(atlas, torch.Tensor):
+    if isinstance(renders, torch.Tensor):
         try:
-            atlas = atlas.detach().cpu().numpy()
+            renders = renders.detach().cpu().numpy()
         except:
-            atlas = atlas.numpy()
-    if isinstance(affine, torch.Tensor):
-        affine = affine.detach().cpu().numpy()
+            renders = renders.numpy()
     mod_labels = args['dataset']['modalities']
     if args['save_certainty_maps']:
         seg_labels = [f"CertaintyMaps/{label}" for label in args['dataset']['label_names']]
@@ -431,22 +429,22 @@ def save_atlas(args, atlas, affine, temp_steps, condition_vectors, epoch, tb_wri
             ext = '.nii.gz' if is_certainty else '.bmp'
             for t_idx in range(t):
                 filename = f'{mod_labels[i]}_ga={temp_steps[t_idx]}_cond={c}_ep={epoch}{ext}'
-                save_img(atlas[..., i, c, t_idx],
+                save_img(renders[..., i, c, t_idx],
                          output_path=args['output_dir'], filename=filename)
     
     # Print intensity ranges for debugging "black image" issues
     for i, mod in enumerate(mod_labels):
-        mod_data = atlas[..., i, :, :]
-        print(f"[Atlas Range] {mod}: min={mod_data.min():.4f}, max={mod_data.max():.4f}")
+        mod_data = renders[..., i, :, :]
+        print(f"[Render Range] {mod}: min={mod_data.min():.4f}, max={mod_data.max():.4f}")
     
-    print('Atlas saved to {}'.format(args['output_dir']))
+    print('Renders saved to {}'.format(args['output_dir']))
 
-    # Log atlas images to TensorBoard
+    # Log rendered images to TensorBoard
     if tb_writer is not None:
         for c in range(n_conds):
             for i in range(len(mod_labels)):
                 for t_idx in range(t):
-                    img_data = atlas[..., i, c, t_idx]
+                    img_data = renders[..., i, c, t_idx]
                     # For 3D: take middle slice; for 2D: use as-is
                     if img_data.ndim == 3:
                         mid = img_data.shape[2] // 2
@@ -464,8 +462,8 @@ def save_atlas(args, atlas, affine, temp_steps, condition_vectors, epoch, tb_wri
                     else:
                         img_2d = np.zeros_like(img_2d)
                     
-                    # Fixed tag: atlas/{mod_label}/cond{c}_t{t_val}
-                    tag = f'atlas/{mod_labels[i]}/cond{c}_t{temp_steps[t_idx]}'
+                    # Fixed tag: renders/{mod_label}/cond{c}_t{t_val}
+                    tag = f'renders/{mod_labels[i]}/cond{c}_t{temp_steps[t_idx]}'
                     tb_writer.add_image(tag, img_2d, epoch, dataformats='HW')
 
 
@@ -1429,7 +1427,7 @@ def denormalize_conditions(args, cond_key, values):
     """
     c_min = args['dataset']['constraints'][cond_key]['min']
     c_max = args['dataset']['constraints'][cond_key]['max']
-    c_scale = args['atlas_gen']['cond_scale']
+    c_scale = args['model_gen']['cond_scale']
     values = (values / c_scale + 1) / 2 * (c_max - c_min) + c_min
     return values
 

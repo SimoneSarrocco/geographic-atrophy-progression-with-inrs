@@ -89,7 +89,7 @@ def _mean_se(vals):
 def _select_best_epoch(rows, criterion="DICE"):
     """Keep only the rows from the single best validation epoch, per split. The best epoch is the one
     whose AGGREGATE held-out DICE (mean over ALL held-out eyes and positions of that split at that
-    epoch) is highest -- exactly the criterion build_atlas uses to save checkpoint_best.pth. So the
+    epoch) is highest -- exactly the criterion build_model uses to save checkpoint_best.pth. So the
     reported numbers are the SELECTED checkpoint's, not an average over the whole training trajectory.
 
     The chosen epoch is picked by DICE; every other metric (PSNR/SSIM/area) is then read off that same
@@ -145,7 +145,7 @@ def main():
                     help="Report metrics from the SINGLE best validation epoch (reconstructs "
                          "checkpoint_best.pth) instead of POOLING every validation epoch. Per split, "
                          "picks the epoch with the highest aggregate held-out DICE -- the same "
-                         "criterion build_atlas uses to save checkpoint_best.pth -- then reports every "
+                         "criterion build_model uses to save checkpoint_best.pth -- then reports every "
                          "held-out position's metrics AT that one epoch. Falls back to pooled for any "
                          "split whose metric filenames lack an 'ep=' tag.")
     args = ap.parse_args()

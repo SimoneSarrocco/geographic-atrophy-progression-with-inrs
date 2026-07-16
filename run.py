@@ -4,7 +4,7 @@ import yaml
 import argparse
 import wandb as wd
 from torch.utils.tensorboard import SummaryWriter
-from build_atlas import AtlasBuilder
+from build_model import ModelBuilder
 from data_loading.dataset import validate_splits
 from download_lakefs_data import download_dataset
 os.environ["WANDB__SERVICE_WAIT"] = "500"
@@ -15,18 +15,18 @@ _DEFAULT_CONFIG_DATA = os.path.join(_REPO_ROOT, 'configs', 'config_data.yaml')
 
 
 def initial_setup(cmd_args=None):
-    atlas_path = (cmd_args or {}).get('config_atlas') or \
-        os.path.join(_REPO_ROOT, 'configs', 'config_atlas.yaml')
-    print(f"Loading atlas config from: {atlas_path}")
-    with open(atlas_path, 'r') as stream:
-        args_atlas = yaml.safe_load(stream)
+    config_model_path = (cmd_args or {}).get('config_model') or \
+        os.path.join(_REPO_ROOT, 'configs', 'config_model.yaml')
+    print(f"Loading model config from: {config_model_path}")
+    with open(config_model_path, 'r') as stream:
+        args_model = yaml.safe_load(stream)
     with open(_DEFAULT_CONFIG_DATA, 'r') as stream:
         # Precedence: explicit --config_data on the CLI wins; otherwise use the `config_data`
-        # field INSIDE the chosen --config_atlas file (so per-config data sections like
+        # field INSIDE the chosen --config_model file (so per-config data sections like
         # faf_ga_768 / faf_ga_indep / faf_ga_timeinput are actually honored). Falls back to 'faf_ga'.
-        config_data = (cmd_args or {}).get('config_data') or args_atlas.get('config_data', 'faf_ga')
+        config_data = (cmd_args or {}).get('config_data') or args_model.get('config_data', 'faf_ga')
         args_data = {'dataset': yaml.safe_load(stream)[config_data]}
-    args = {**args_data, **args_atlas}
+    args = {**args_data, **args_model}
     with open(args['dataset']['subject_ids'], 'r') as stream:
         args['dataset']['subject_ids'] = yaml.safe_load(stream)[args['dataset']['dataset_name']]['subject_ids']
     if cmd_args is not None:
@@ -54,8 +54,8 @@ def initial_setup(cmd_args=None):
     # save config files
     with open(os.path.join(args['output_dir'], 'config_data.yaml'), 'w') as f:
         yaml.dump(args_data, f)
-    with open(os.path.join(args['output_dir'], 'config_atlas.yaml'), 'w') as f:
-        yaml.dump(args_atlas, f)
+    with open(os.path.join(args['output_dir'], 'config_model.yaml'), 'w') as f:
+        yaml.dump(args_model, f)
     print(f"Saved config files to {args['output_dir']}")
 
     has_seg = args['inr_decoder']['out_dim'][-1] > 0
@@ -63,12 +63,12 @@ def initial_setup(cmd_args=None):
     if args['inr_decoder']['out_dim'][0] != expected_sr_mods:
         print(f"WARNING: The number of output dimensions ({args['inr_decoder']['out_dim'][0]}) " 
               f"might not match the number of intensity modalities ({expected_sr_mods}).")
-    if args['atlas_gen']['conditions'] is not None: # check if all atlas conditions are set True in the dataset config
-        for key in list(args['atlas_gen']['conditions'].keys()):
+    if args['model_gen']['conditions'] is not None: # check every render condition is enabled in the dataset config
+        for key in list(args['model_gen']['conditions'].keys()):
             if not args['dataset']['conditions'][key]:
-                print(f"WARNING: The atlas condition {key} is not set True in the dataset config."
-                    f"Turning off the atlas generation for {key}.")
-                args['atlas_gen']['conditions'].pop(key)
+                print(f"WARNING: The render condition {key} is not set True in the dataset config."
+                    f"Turning off the render generation for {key}.")
+                args['model_gen']['conditions'].pop(key)
 
     if args['logging']: # init weights and biases if logging is True
         wd.init(config=args, project=args['project_name'], 
@@ -95,11 +95,11 @@ def override_args(config_args, cmd_args):
 
 
 def parse_cmd_args():
-    parser = argparse.ArgumentParser(description="GAP-INR Atlas Builder")
+    parser = argparse.ArgumentParser(description="GAP-INR training entry point")
     parser.add_argument("--config_data", type=str, default=None,
                         help="Override the dataset section in config_data.yaml. If omitted, the "
-                             "config_data field inside the --config_atlas file is used.")
-    parser.add_argument("--config_atlas", type=str, help="Path to a config_atlas YAML (default: configs/config_atlas.yaml)")
+                             "config_data field inside the --config_model file is used.")
+    parser.add_argument("--config_model", type=str, help="Path to a config_model YAML (default: configs/config_model.yaml)")
     parser.add_argument("--seed", type=int, help="Seed")
     parser.add_argument("--inr_decoder__out_dim", type=int, nargs='+', help="Number of output dimensions [#modalities, #classes of segmentation]")
     parser.add_argument("--inr_decoder__tf_dim", type=int, help="Degrees of freedom for the transformation")
@@ -108,7 +108,7 @@ def parse_cmd_args():
     parser.add_argument("--inr_decoder__hidden_size", type=int, help="Hidden size of the sr network")
     parser.add_argument("--inr_decoder__num_hidden_layers", type=int, help="Number of hidden layers of the sr network")
     parser.add_argument("--inr_decoder__modulated_layers", type=int, nargs='+', help="Modulated layers")
-    parser.add_argument("--atlas_gen__cond_scale", type=float, help="Scale of the condition vector")
+    parser.add_argument("--model_gen__cond_scale", type=float, help="Scale of the condition vector")
     parser.add_argument("--n_subjects__train", type=int, help="Number of subjects to use for training")
     parser.add_argument("--n_subjects__val", type=int, help="Number of subjects to use for validation")
     parser.add_argument("--overfit", action="store_true", help="Use the same subjects for training and validation")
@@ -123,7 +123,7 @@ def main():
     cmd_args = parse_cmd_args()
     args = initial_setup(cmd_args)
     print(args['inr_decoder'])
-    atlas_builder = AtlasBuilder(args)
+    model_builder = ModelBuilder(args)
     
     # Close TensorBoard writer
     if 'tb_writer' in args and args['tb_writer'] is not None:
