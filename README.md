@@ -1,0 +1,310 @@
+# GAP-INR — Geographic-Atrophy Progression with Implicit Neural Representations
+
+GAP-INR forecasts the progression of geographic atrophy (GA) in age-related macular degeneration from
+longitudinal fundus autofluorescence (FAF) imaging, using a conditional implicit neural representation
+(INR). This repository covers data preparation, training, validation, testing, test-time adaptation,
+the ablations, and the figures.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Model architecture options](#model-architecture-options)
+- [Repository layout](#repository-layout)
+- [Installation](#installation)
+- [Data preparation](#data-preparation)
+- [The workflow: train, validate, test, adapt](#the-workflow-train-validate-test-adapt)
+- [Outputs, logging, and checkpoints](#outputs-logging-and-checkpoints)
+- [Reproducing the paper](#reproducing-the-paper)
+- [Configuration reference](#configuration-reference)
+- [Attribution, license, citation](#attribution-license-citation)
+
+---
+
+## How it works
+
+Each patient-eye is represented as a continuous field. One SIREN decoder is shared across the whole
+cohort and modulated two ways:
+
+- per eye, by a latent code (one latent per eye, shared across that eye's visits);
+- per visit, by a temporal conditioning variable (weeks from baseline), applied as FiLM modulation.
+
+From one query coordinate the decoder predicts the FAF intensity (reconstruction head) and the GA
+segmentation (segmentation head). The model is 2-D and resolution-agnostic — it maps coordinates to
+values — so a model trained at one resolution can be evaluated at another without retraining.
+
+At test time the decoder is frozen and only a new eye's latent code is optimized (test-time
+adaptation, TTA) on its available visits. Advancing the temporal condition then produces a future
+visit, so the model can predict a GA mask for a visit whose image was never acquired. This is the
+forecasting task the paper evaluates.
+
+Compare models on the task metric — held-out GA DICE and lesion-area MAE — reported separately for
+interpolation (a middle visit held out) and extrapolation (the last visit held out). The training
+loss is a poor guide, because the roughly 95% background dominates it.
+
+---
+
+## Model architecture options
+
+The architectural choices live in the `inr_decoder` section of `configs/config_atlas.yaml`, and each
+has an ablation in `ablations/`. The values below are the paper defaults.
+
+### Output heads: shared or separate
+- Separate heads (default, `shared_output_layer: false`). Two output layers: the reconstruction head
+  reads the last SIREN layer and predicts FAF intensity; the segmentation head reads the penultimate
+  layer and predicts the GA logits. Reading the segmentation logits one layer earlier uses slightly
+  lower-frequency features, which segment better, and decouples the two tasks.
+- Shared output head (`shared_output_layer: true`). A single output layer maps to `[recon | seg]`
+  together, as in the original INR-atlas code. It is more parameter-efficient but couples the two
+  tasks; when it is on, the `seg_head_*` and `seg_branch` options are ignored. Channel order is
+  unchanged, so metrics and plots still work. Ablations: `arch_C_shared_output`, `r3_shared_output`.
+
+### Segmentation-head capacity
+- `seg_head_num_layers: 0` gives a single linear segmentation head (default); a value above 0 gives a
+  ReLU MLP of width `seg_head_hidden_size`. Ablation: `r2_a9_separated_mlp`.
+- `seg_head_use_last_features: true` also feeds the last-layer features (not only the penultimate
+  layer) to the segmentation head.
+- Dedicated segmentation branch (`seg_branch.activate: true`): a short SIREN sub-network taps a
+  mid-trunk layer (`branch_layer`, default penultimate), is FiLM-modulated by the latent, and decodes
+  labels through its own layers. It gives the segmentation more capacity than the head while still
+  sharing the trunk, and replaces the penultimate segmentation head when active. Ablations:
+  `arch_A_penult_last`, `arch_B_penult_only`.
+
+### Temporal conditioning: FiLM or input coordinate
+- FiLM conditioning (default). The temporal variable modulates the SIREN via FiLM. Its encoding is set
+  by `cond_encoding`: `raw` (scalar), `mlp` (learned embedding), or `fourier` (`cond_num_frequencies`
+  bands). Ablation: `a8_condmlp`.
+- Time as input (`time_as_input: true`). The temporal variable enters as an extra INR input
+  coordinate, optionally Fourier-encoded via `time_num_frequencies`. Ablation: `a1_timeinput_freq6`.
+- `modulated_layers` sets which SIREN layers receive FiLM modulation (default: all).
+
+### Latent representation
+- `latent_dim: [C, H, W]` is a per-eye latent grid (channels by spatial size); more spatial resolution
+  carries more per-eye detail. Ablations: `a3_latent16/64/128` and the channel-by-spatial sweep
+  `r2_a9_grid_c*_s*`.
+- Per-eye vs per-visit latents. By default one latent is shared across an eye's visits and time enters
+  through conditioning. `independent_visits: true` (in `config_data.yaml`) gives one latent per visit
+  instead. Ablation: `a2_pervisit`.
+- `cnn_kernel_size` adds a CNN modulator that spatially mixes the latent grid (`0` is the identity).
+
+### SIREN frequency (ω)
+`omega_0` (first layer) with `omega_start`/`omega_end` and `schedule_type` (`constant`, `linear`, or
+`exponential`) set the SIREN activation frequency per layer, which trades detail against smoothness.
+Ablations: `a5_omega100`, the `r4_omega_*` sweep, and `grid_search_omega.py`.
+
+### Training
+The decoder weights and the persistent per-eye latents are optimized together during training
+(auto-decoder). At test time the decoder is frozen and only the latent is fit.
+
+### Inference post-processing
+`renormalize_output` stretches the reconstructed intensity per image; `seg_threshold` sets the
+confidence cutoff on P(GA); `seg_postprocess` (`keep_largest`, `min_area_px`) cleans up connected
+components in the GA mask.
+
+Each ablation changes one of these against a fixed reference, so its effect is isolated. See
+[`ablations/README.md`](ablations/README.md).
+
+---
+
+## Repository layout
+
+| Path | Role |
+|---|---|
+| `run.py` | Train entry point (assembles config, guards the split, launches the builder). |
+| `build_atlas.py` | Core engine (`AtlasBuilder`): train / validate / test / test-time-adaptation loops, checkpointing, figures. |
+| `evaluate.py` | Standalone evaluation (val + test leave-one-out, TTA, clinical forecast) writing summary CSVs. |
+| `summarize_eval.py` | Interpolation-vs-extrapolation held-out summary table. |
+| `temporal_sensitivity.py` | Static-collapse diagnostic (does the time pathway do anything?). |
+| `predict_future.py`, `train_latent_transition.py` | Optional two-stage latent-dynamics forecasting. |
+| `inference.py` | Minimal checkpoint-to-prediction wrapper. |
+| `run_pipeline.sh` | One-command orchestrator (train, eval, diagnose, trajectory figure). |
+| `plot_trajectories.py`, `plot_lesion_size_trajectories.py`, `seg_growth.py`, `analyze_faf_seg.py`, `visualize_grader_variability.py` | Figures and analysis. |
+| `grid_search_omega.py`, `run_grid_entry.py` | SIREN-frequency (ω₀) hyperparameter search. |
+| `verify_run_config.py` | Recover the config that a checkpoint was trained with. |
+| `configs/` | Model config (`config_atlas.yaml`), dataset config (`config_data.yaml`), split guard, lakeFS template. |
+| `models/` | SIREN trunk, INR decoder, condition/time encoders, ω scheduler. |
+| `data_loading/` | Dataset, coordinate sampling, preprocessing, optional remote (lakeFS) loader. |
+| `preprocessing/` | Scripts that build the clinical CSV and the train/val/test split. |
+| `ablations/` | Self-contained ablation suite (configs, runner, tables, figures). |
+| `docs/` | Documentation (see below). |
+| `utils.py` | Shared library (loss, grids, image IO, logging, figure helpers). |
+
+Documentation:
+[`docs/DATA.md`](docs/DATA.md) (data preparation) ·
+[`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) (steps to reproduce the paper) ·
+[`docs/PIPELINE.md`](docs/PIPELINE.md) (train, eval, diagnose, and what to monitor) ·
+[`docs/BASELINES.md`](docs/BASELINES.md) (ImageFlowNet comparison) ·
+[`ablations/README.md`](ablations/README.md).
+
+---
+
+## Installation
+
+Python 3.10 and a CUDA-capable GPU are recommended.
+
+```bash
+conda env create -f environment.yml     # creates the 'gap-inr' env
+conda activate gap-inr
+# or:  pip install -r requirements.txt
+```
+
+The pipeline is 2-D only and has no volumetric-imaging dependencies.
+
+---
+
+## Data preparation
+
+See [`docs/DATA.md`](docs/DATA.md) for the full reference. In short:
+
+**1. Metadata CSV.** One row per patient-eye visit (`configs/config_data.yaml → tsv_file`, default
+`./data/clinical_metadata.csv`). Key columns: `Eye_ID` (identity, maps to one latent), `split`
+(train/val/test), `Patient_ID`, `Eye` (OD/OS), `Visit_ID`, `faf_path`, `ga_mask_path`, a time source
+(`visit_date` or `diff` or `Visit_Number`), and optionally `AgeatVisit` and `ScaleXSlo`/`ScaleYSlo`
+(mm/pixel, for area in mm²).
+
+**2. Conditioning variables.** You do not pre-compute the time axis. Provide dates (`visit_date`),
+elapsed days (`diff`), or `Visit_Number` plus a `visit_week_map`, and the loader derives
+`weeks_from_baseline`. Any extra numeric covariate becomes a FiLM condition once you list it under
+`conditions` and `constraints` in `config_data.yaml`. See [`docs/DATA.md §2–3`](docs/DATA.md).
+
+**3. Folder structure.** GA masks follow a fixed layout; the FAF path comes from the CSV. lakeFS is
+optional and off by default (local disk).
+
+Local (default): masks resolve under `cache_path/branch/data/…`. With the defaults that is:
+
+```
+<repo>/
+├── cache/faf_ga/main/data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/
+│        ├── <Patient_ID>_<Eye>_<Vxx>_mask01.png     # (+ mask02/03 for majority/soft grader modes)
+│        └── <Patient_ID>_<Eye>_<Vxx>_FAF.png        # FAF (point faf_path here, or anywhere)
+└── data/clinical_metadata.csv
+```
+
+Use `mask_grader_mode: single` if you have one mask per visit (name it `…_mask01.png`); the paper uses
+`majority` (3-grader vote). Change `cache_path` to place everything under a different root.
+
+lakeFS (optional): copy `configs/lakefs_cfg.example.yaml` to `configs/lakefs_cfg.yaml`, fill in the
+endpoint and keys, and set `repo`/`branch`/`cache_path` in the `lakefs:` block. lakeFS object keys
+mirror `data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/…`, and files download to `cache_path/branch/data/…`
+on first use. Without the credentials file the loader reads from local disk.
+
+**4. Split.** `preprocessing/add_split_column.py` writes a patient-wise `split` column. The canonical
+partition is frozen in `configs/expected_split.yaml`, and every run aborts if the resolved split
+differs (a leakage guard). [`docs/DATA.md §5–7`](docs/DATA.md) gives the exact folder trees and the
+full column reference.
+
+---
+
+## The workflow: train, validate, test, adapt
+
+### 1. Training (`run.py`)
+
+Trains the shared SIREN decoder and the per-eye latents on the train split, minimizing FAF
+reconstruction (MSE) plus GA segmentation (cross-entropy + Dice).
+
+```bash
+python run.py                                  # uses configs/config_atlas.yaml + the faf_ga_620 data section
+python run.py --config_atlas ablations/configs/r2_a9_chan256.yaml   # a specific config
+```
+
+`validate_splits()` runs first and aborts on any train/val/test overlap or split mismatch. Checkpoints
+are written every `validate_every` epochs, and the best one is selected on held-out validation DICE.
+
+### 2. Validation, which is the test-time procedure
+
+Validation runs the same procedure used at deployment: the trained decoder is frozen, a fresh latent
+is optimized on each val eye's optimization visits (reconstruction only, `epochs.val` steps), and the
+model is evaluated on the held-out visit. The segmentation for that visit is produced without a mask.
+This is what selects the best checkpoint. It runs during training, and can also run standalone:
+
+```bash
+python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
+    --holdout_strategy leave_one_out --test off        # val only (model selection)
+```
+
+### 3. Testing
+
+Run the selected model once on the test split (comparing configs on the test set would leak):
+
+```bash
+python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
+    --holdout_strategy leave_one_out --test on
+```
+
+This runs full leave-one-out over every visit position and calls `summarize_eval.py`, writing
+`evaluation_*/leave_one_out_summary.csv` with held-out DICE, PSNR, SSIM, Hausdorff distance, and
+lesion-area MAE, grouped into interpolation and extrapolation. That is the table to report.
+
+### 4. Test-time adaptation and forecasting scenarios
+
+- Scenario 1 (single pair): forecast a target visit from one earlier visit.
+- Scenario 2 (full history): adapt the eye's latent on all past visits, then forecast. `--support_k K`
+  fits on the first `K` visits and predicts the rest (`--support_k 1` forecasts everything from the
+  baseline visit):
+
+```bash
+python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth --support_k 1 --skip_val
+```
+
+`--epochs_val N` sets the TTA budget (number of latent-fit steps).
+
+### 5. Diagnose and visualize
+
+```bash
+python temporal_sensitivity.py --checkpoint runs/<run>/checkpoint_best.pth --split test   # RESPONSIVE / COLLAPSED
+python plot_trajectories.py --csv runs/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
+```
+
+`./run_pipeline.sh` runs the whole sequence and picks a free GPU. [`docs/PIPELINE.md`](docs/PIPELINE.md)
+covers what to watch during training.
+
+---
+
+## Outputs, logging, and checkpoints
+
+Each run creates `runs/<config>_<timestamp>_<jobid>/` with:
+
+- `config_atlas.yaml` and `config_data.yaml`, the exact configs used.
+- `checkpoint_best.pth` (best held-out DICE), `checkpoint_best_loss.pth`, and periodic
+  `checkpoint_epoch_*.pth`. A checkpoint stores the decoder weights, the latents, the config, and the
+  dataframe.
+- `tb_logs/` for TensorBoard (loss terms, held-out DICE/PSNR/SSIM, time-sensitivity, reconstruction
+  figures); view with `tensorboard --logdir runs/<run>/tb_logs`.
+- per-split metric JSONs and CSVs, reconstruction and publication figures, and `lesion_analysis/`.
+- `evaluate.py` adds `evaluation_*/` with `leave_one_out_summary.csv`.
+
+For Weights & Biases logging, set `logging: True` and a `wandb_entity` in `config_atlas.yaml`.
+
+---
+
+## Reproducing the paper
+
+The best configuration is [`ablations/configs/r2_a9_chan256.yaml`](ablations/configs/r2_a9_chan256.yaml)
+(SIREN hidden 384 over 8 FiLM-modulated layers, latent `[256, 32, 32]`, ω = 30, `sr_weight` 10,
+`lr_inr` 1e-4, `lr_latent` 5e-3, 620-crop to 512 grid). [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md)
+has the step-by-step instructions, the ablation sweep, and the baseline protocol. The comparison
+methods are the ImageFlowNet family ([`docs/BASELINES.md`](docs/BASELINES.md)).
+
+---
+
+## Configuration reference
+
+Two YAML files are merged at startup (`run.py`):
+
+- `configs/config_atlas.yaml`: model, optimizer, and training (decoder architecture, `latent_dim`,
+  SIREN `omega_*`, loss weights, `epochs`, TTA budget, checkpoint selection). It carries a
+  `config_data:` key naming the dataset section to use.
+- `configs/config_data.yaml`: dataset sections. A base `faf_ga` (a YAML anchor) and variants that
+  inherit it and change only resolution, conditioning, or sampling (`faf_ga_512`, `faf_ga_620`,
+  `faf_ga_twovar_wktemporal_512`).
+
+Select a data section on the command line (`--config_data faf_ga_620`) or through the `config_data:`
+field of the chosen `--config_atlas`. Any nested field can be overridden with `--section__key value`.
+See [`configs/README.md`](configs/README.md).
+
+---
+
+## Attribution, license, citation
+
+This work builds on a prior open-source conditional-INR atlas framework; see
+[`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0).
+Citation details for the paper will be added on publication.

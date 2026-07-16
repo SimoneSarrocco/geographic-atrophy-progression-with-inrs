@@ -1,0 +1,13 @@
+# Template for lakeFS / S3 credentials — COPY to `lakefs_cfg.yaml` and fill in your own values.
+#
+# This file (the real, filled-in one) is read at runtime by data_loading/dataset.py and
+# preprocessing/data_fetch.py to pull images from an S3-compatible object store versioned with
+# lakeFS (https://lakefs.io). It is OPTIONAL: if you keep your images on local disk under the
+# layout described in docs/DATA.md, you do not need lakeFS at all and can ignore this file.
+#
+# NEVER commit the filled-in lakefs_cfg.yaml — it contains secrets. It is git-ignored by default.
+
+s3_endpoint:  "https://your-lakefs-host:8000"   # lakeFS S3 gateway endpoint
+access_key:   "YOUR_ACCESS_KEY_ID"
+secret_key:   "YOUR_SECRET_ACCESS_KEY"
+ca_bundle:    ""                                  # path to a CA cert bundle, or "" to disable TLS verification

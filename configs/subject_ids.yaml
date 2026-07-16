@@ -1,0 +1,23 @@
+# Optional per-dataset train/val/test ID lists.
+#
+# The main `faf_ga` dataset uses the OFFICIAL split encoded in the `split` column of the clinical
+# CSV (config_data.yaml sets `split_column: split`), so the lists below are EMPTY on purpose:
+# with empty lists, Data.sample_subject_ids() (data_loading/dataset.py) takes the CSV-`split`
+# branch instead of this fallback. This guarantees every method (GAP-INR + the ImageFlowNet
+# baselines) shares exactly one split. See configs/expected_split.yaml for the canonical partition
+# and docs/DATA.md for details.
+#
+# To pin a split HERE instead of via the CSV, fill the lists with your `id_column` values.
+
+faf_ga:
+  subject_ids:
+    train: []
+    val: []
+    test: []
+
+# --- Template: how to define an explicit split for a custom cohort ---
+# my_cohort:
+#   subject_ids:
+#     train: [SUBJECT_A, SUBJECT_B]
+#     val:   [SUBJECT_C]
+#     test:  [SUBJECT_D]

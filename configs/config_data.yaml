@@ -1,0 +1,361 @@
+faf_ga: &faf_ga
+  dataset_name: faf_ga
+  independent_visits: false
+  mask_grader_mode: 'majority'  # EXACT-REPRO: good run used majority vote. ('single' | 'majority' | 'augment' train-only | 'soft' per-pixel mean of graders)
+  subject_ids: ./configs/subject_ids.yaml
+  id_column: Eye_ID
+  split_column: split
+  # Longitudinal clinical/metadata table (one row per patient-eye visit); see docs/DATA.md for
+  # the required columns. Point this at your own CSV.
+  tsv_file: './data/clinical_metadata.csv'
+  modalities: ['faf_path', 'ga_mask_path']
+  # OPTIONAL remote store. lakeFS (https://lakefs.io) is an open-source data-versioning layer over
+  # an S3-compatible bucket; images are fetched to `cache_path` on first use. Leave the loader
+  # unconfigured (no credentials file) to read images directly from local disk instead — see
+  # docs/DATA.md. Credentials are read from an external file (never committed); see
+  # configs/lakefs_cfg.example.yaml.
+  lakefs:
+    repo: your-lakefs-repo
+    branch: main
+    cache_path: ./cache/faf_ga
+  conditions:
+    # Age-time + weeks-FiLM baseline: AgeatVisit is the TIME INPUT coordinate (temporal_condition +
+    # time_as_input), weeks_from_baseline is the FiLM conditioning vector (cond_dims=1). This keeps the
+    # good run's temporal axis (age-as-time) but swaps the leaky/NaN-prone lesion_size FiLM condition
+    # for weeks_from_baseline, which is complete (no NaN -> no visits dropped) and not derived from the
+    # GA mask. lesion_size OFF as both a condition AND a constraint (see below) so its 9 NaN rows
+    # (incl. EYE28_OS V3/V4) are no longer dropped by check_constraints.
+    AgeatVisit: false           # -> time INPUT coordinate (temporal_condition below, time_as_input: true)
+    weeks_from_baseline: true  # -> FiLM conditioning vector (cond_dims=1); complete, non-leaky
+    lesion_size: false         # OFF: leaky (derived from GA mask) and NaN for 9 visits
+    lesion_count: false
+    # Gender: false
+    # SmokingPY: false
+  temporal_condition: weeks_from_baseline  # AgeatVisit is the time input. (sibling of `conditions`, not a condition itself)
+  # Normalisation bounds set to the ACTUAL observed range across all patient-eyes (not arbitrary
+  # padding). This makes training/interpolation use the full [-1,1] FiLM/time dynamic range. Real
+  # visits are filtered to this range by check_constraints, and interpolation stays between in-range
+  # visits, so the ONLY inputs that can exceed [min,max] are extrapolated/atlas grid values — whose
+  # behaviour is governed entirely by extrapolate_beyond_range below. AgeatVisit observed range
+  # across the 148 visits is [66.0, 90.906229]; the constraint max is set to 91.0 so the eye that
+  # DEFINES the maximum age (EYE31_OD V4 = 90.906229) is not clipped by check_constraints. A max
+  # of 90.906 rounded DOWN and silently dropped that visit (23 test rows instead of 24 -> 33 pairs
+  # instead of 36 in the pairwise eval, and EYE31_OD's true last visit never predicted).
+  #
+  # weeks_from_baseline is computed per-visit from the real visit_date (Excel-serial days) relative to
+  # each eye's first visit (_add_weeks_from_baseline_col), NOT a hardcoded visit->week map. Because
+  # intervals differ per eye, the true range is [0, 54.14] weeks, not {0,12,24,48}. With
+  # weeks_constraint_from_dates the min/max below are OVERRIDDEN at load time from the date-derived
+  # column (global over the full CSV, so all splits share the same normalisation). The values here are
+  # just the current observed range, kept as a fallback if dates are unavailable.
+  # Single switch governing what happens to out-of-range time/condition inputs (the time-input
+  # AgeatVisit and the FiLM condition weeks_from_baseline). It is the ONLY clamp control: when the
+  # decoder is fed a value outside the observed [min,max] it is clamped to the boundary UNLESS this
+  # flag is true.
+  #   false -> clamp to [min,max]: extrapolated/atlas-grid predictions FREEZE at the last in-range
+  #            appearance (safe; avoids periodic-SIREN saturation to black/white garbage).
+  #   true  -> no clamp: the normalised inputs exceed |1| and the GA prediction keeps PROGRESSING
+  #            past the training horizon. Affects the extrapolation generation paths
+  #            (_generate_novel_visits future offsets, publication-figure future columns, the
+  #            continuous lesion trajectory) and the atlas/condition grids (utils.normalize_condition).
+  # Real-visit reconstruction/metrics are unaffected either way (already in-range via check_constraints).
+  # NOTE: true is genuine out-of-distribution extrapolation for a periodic SIREN -- quality past the
+  # horizon is not guaranteed; verify trajectories look monotone/plausible (the lesion monotonicity
+  # check is your guardrail) and shorten atlas_gen.future_offsets_weeks if they degrade.
+  extrapolate_beyond_range: true
+  weeks_constraint_from_dates: true    # derive weeks_from_baseline [min,max] from visit_date at load
+  min_valid_visits_eval: 2             # val/test: drop eyes with fewer valid visits (LOO needs >=2)
+  constraints:
+    weeks_from_baseline:
+      type: numeric
+      min: 0.0
+      max: 54.143
+    AgeatVisit:
+      type: numeric
+      min: 66.0
+      max: 91.0        # was 90.906 -> clipped EYE31_OD V4 (AgeatVisit 90.906229); 91.0 includes it
+      distribution:
+        type: 'uniform'
+        priority: 10
+    #Gender:
+    #  type: categoric
+    #  values: ['male', 'female']
+    #  distribution:
+    #    type: 'uniform'
+    #    priority: 10
+    #"SmokingPY:
+    #  type: numeric
+    #  min: 0
+    #  max: 100
+    #  distribution:
+    #    type: 'uniform'
+    #    priority: 10
+    # lesion_size constraint DISABLED: check_constraints() drops rows whose constrained column is NaN,
+    # regardless of whether lesion_size is an enabled condition. Keeping it active would still drop the
+    # 9 NaN-lesion_size visits (incl. EYE28_OS V3/V4). Re-enable only if you condition on lesion_size.
+    # lesion_size:
+    #   type: numeric
+    #   min: 0.0
+    #   max: 15.0
+    #   distribution:
+    #     type: 'uniform'
+    #     priority: 10
+    # lesion_count:
+    #  type: numeric
+    #  min: 0
+    #  max: 12
+    #  distribution:
+    #    type: 'uniform'
+    #    priority: 10
+  label_names: ['BG', 'GeographicAtrophy']
+  # Cross-entropy class weights. REVERTED to [1,1] after inspecting real results:
+  # the recent [1,1] baseline (run_20260620_133914) does NOT under-segment -- on
+  # held-out last visits it actually OVER-predicts GA (pred 6.0 vs GT 4.7 mm2, DICE
+  # 0.81) and on optimized visits DICE 0.96. So the earlier "under-segmentation ->
+  # use [1,4]" reasoning was wrong for this data; [1,4] would over-segment further.
+  # The original 135122 baseline also used [1,1]. If you ever see genuinely low
+  # recall (predicting too little GA), nudge to [1,1.5]-[1,2], not higher.
+  class_weights: [1.0, 1.0]
+  world_bbox: [620, 620] #  EXACT-REPRO of run_20260622_153015_loc (good run used 512 center-crop, NOT 620)
+  sampling_strategy: 'all' # 'all' or 'mask'
+  # CANONICAL normalization for the paper (shared by ALL methods via models/common_preproc.py):
+  # PLAIN PER-VISIT min-max -> each visit scaled by its own (min, max) to [0,1], applied AFTER
+  # crop+resize (on the 512 image / sampled values). 'minmax' hits the per-visit branch
+  # (normalize_intensities) and skips _compute_patient_stats, so GT loading (_minmax) matches too.
+  # Applies to every faf_ga_* variant below (<<: *faf_ga). (was minmax_patient_robust.)
+  normalize_values: 'minmax'
+  visit_week_map:
+    1: 0
+    2: 12
+    3: 24
+    4: 48
+  # NOTE: time-input normalization uses the `constraints[temporal_condition]` bounds (e.g. AgeatVisit
+  # 60-100), NOT a separate weeks range. The former `time_normalization: {min_weeks, max_weeks}` block
+  # was never read by any code and has been removed to avoid confusion.
+  sampling_bbox: [620, 620]  # EXACT-REPRO of run_20260622_153015_loc (512, NOT 620)
+
+# --- STAGE 1 of the per-visit-latent + latent-dynamics plan ---
+# Same as `faf_ga` but: (1) independent_visits true -> ONE latent per VISIT (latent bank
+# sized to len(df)), and (2) ALL conditions OFF so each per-visit latent must encode the
+# FULL visit state (no weeks-FiLM shortcut) -> a clean substrate for Stage 2 latent dynamics
+# (train_latent_transition.py reads weeks_from_baseline from the df, which is still computed).
+faf_ga_indep:
+  <<: *faf_ga
+  independent_visits: true
+  conditions:
+    AgeatVisit: false
+    weeks_from_baseline: false
+    lesion_size: false
+    lesion_count: false
+
+# --- TIME-AS-INPUT variant: one latent per EYE (independent_visits false, inherited),
+# but weeks is fed as an INPUT COORDINATE (config_atlas time_as_input: true,
+# temporal_condition=weeks) instead of a FiLM condition. All FiLM conditions OFF so the
+# per-eye latent is PURE identity and time enters only through the SIREN coordinate.
+faf_ga_timeinput:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: false
+    weeks_from_baseline: false
+    lesion_size: false
+    lesion_count: false
+
+# --- FULL-FIELD variant: use the native 768x768 FAF/mask (no 512 center-crop) ---
+# Same as `faf_ga` but world_bbox/sampling_bbox = 768 -> the whole image is used (center-crop
+# of 768 from 768 = identity). Everything else (per-eye latent, weeks-FiLM, etc.) inherited.
+faf_ga_768:
+  <<: *faf_ga
+  world_bbox: [768, 768]
+  sampling_bbox: [768, 768]
+
+# --- REGISTRATION-FRAME-CROPPED variant: centered 620x620 crop of the native 768x768.
+# Removes the per-visit black registration frame (black-px in crop drops ~16x vs 768) WITHOUT
+# clipping any lesion: measured over all 133 valid visits, GA reaches half-extent 302px from
+# center (min crop to keep 100% of GA = 605px), so 620 keeps every GA pixel with margin while
+# 600 would clip 3 eyes by up to 20px. The residual black at this size is the circular-FOV
+# corners (intrinsic to Spectralis FAF), which no square crop can remove. sampling_bbox keeps
+# native resolution + center-crops via coordinate filtering (no resize/interpolation); world_bbox
+# makes the reconstruction grid the same 620x620 over [-1,1]. Everything else inherited from faf_ga.
+faf_ga_620:
+  <<: *faf_ga
+  world_bbox: [620, 620]
+  sampling_bbox: [620, 620]
+
+# --- 512-COMPARISON variant: crop 620 (protect GA) then DOWNSAMPLE to 512, so GAP-INR scores on
+# the SAME 512 grid as the CNN baselines. The ImageFlowNet/guided-diffusion UNet maxes at 512 and
+# a DIRECT 512 center-crop would clip GA in 5/133 visits (max GA half-extent 302px -> needs >=604).
+# crop_before_resize centre-crops native 768->620 (no GA clip), then resizes the crop to world_bbox
+# 512 (mask NEAREST, FAF bilinear). sampling_bbox null -> coordinate sampling on the full 512 image;
+# no upsampling anywhere. Lesion area = (#GA px on the 512 grid) * ScaleXSlo*ScaleYSlo (raw), the
+# IDENTICAL convention used by every 512-scored baseline. Use this for the baseline-comparison runs.
+faf_ga_512:
+  <<: *faf_ga
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+
+# --- 620-crop variants for the ablation suite (same registration crop as faf_ga_620). ---
+# faf_ga_indep_620: ONE latent per VISIT (independent_visits) + all conditions OFF -> the
+# per-visit-latent representation ablation (A2). faf_ga_timeinput_620: one latent per EYE but
+# time enters as an INPUT COORDINATE (conditions OFF, config sets time_as_input/in_dim=3,
+# cond_dims=0) -> the FiLM-vs-time-input ablation (A1). Both inherit everything else from faf_ga.
+faf_ga_indep_620:
+  <<: *faf_ga
+  independent_visits: true
+  conditions:
+    AgeatVisit: false
+    weeks_from_baseline: false
+    lesion_size: false
+    lesion_count: false
+  world_bbox: [620, 620]
+  sampling_bbox: [620, 620]
+
+faf_ga_timeinput_620:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: false
+    weeks_from_baseline: false
+    lesion_size: false
+    lesion_count: false
+  world_bbox: [620, 620]
+  sampling_bbox: [620, 620]
+
+# --- 512 variants (crop 620 -> resize 512) for the ablation suite, so ablations run on the SAME
+# resolution as the F1/F2 comparison (paper requirement). Same as the *_620 ablation sections but
+# with crop_before_resize [620,620] + world_bbox [512,512] + sampling_bbox null (like faf_ga_512). ---
+faf_ga_indep_512:
+  <<: *faf_ga
+  independent_visits: true
+  conditions:
+    AgeatVisit: false
+    weeks_from_baseline: false
+    lesion_size: false
+    lesion_count: false
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+
+faf_ga_timeinput_512:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: false
+    weeks_from_baseline: false
+    lesion_size: false
+    lesion_count: false
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+
+# --- TWO-VARIABLE temporal sections (AgeatVisit + weeks_from_baseline). Both are ENABLED conditions;
+# `temporal_condition` picks which one is the time axis (and, when the ablation sets time_as_input:true,
+# the time-INPUT coordinate -> it is skipped from FiLM and the OTHER enabled condition becomes the FiLM
+# vector; cond_dims is auto-computed in build_atlas._init_inr). Both vars are complete (non-NaN) and
+# have constraints above, so no rows are dropped. ---
+# A) temporal axis = weeks_from_baseline. time_as_input:false -> BOTH FiLM (cond_dims=2);
+#    time_as_input:true -> weeks is the time INPUT, AgeatVisit is FiLM (cond_dims=1).
+faf_ga_twovar_wktemporal_512:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: weeks_from_baseline
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+
+# --- EVAL-RESOLUTION variants of faf_ga_twovar_wktemporal_512 (SAME conditioning; only the sampling
+# grid changes). GAP-INR is an INR (coordinate-based decoder), so a 512-trained checkpoint can be
+# EVALUATED at any grid without retraining. Used to score the paper scenarios table at the resolution
+# each regime is compared against:
+#   _256 = crop 620 -> resize 256 : EXTRAPOLATION, matches the ImageFlowNet 256 run (results/..._seed_1).
+#   _620 = native 620 center-crop : INTERPOLATION, GAP-INR-only (no IFN there).
+# NB: the winner is trained at 512; this evaluates it at 256/620. If you'd rather MATCH IFN's training
+# resolution exactly, retrain the winner with config_data faf_ga_twovar_wktemporal_256 instead. ---
+faf_ga_twovar_wktemporal_256:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: weeks_from_baseline
+  crop_before_resize: [620, 620]
+  world_bbox: [256, 256]
+  sampling_bbox: null
+
+faf_ga_twovar_wktemporal_620:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: weeks_from_baseline
+  world_bbox: [620, 620]
+  sampling_bbox: [620, 620]
+
+# GENERATE at the checkpoint's NATIVE training grid (crop 620 -> 512), then resize the prediction AND
+# the GT down to 256x256 right BEFORE scoring (metric_resize) -- so GAP-INR predicts at the resolution
+# it was trained on and is only downsampled to match ImageFlowNet's metric grid (crop 620 -> 256).
+# This is the fair extrapolation-vs-IFN setup: same FOV (620 crop), same metric resolution (256), but
+# GAP-INR is not forced to sample its INR on an off-training 256 grid. HD is then in 256-grid pixels.
+faf_ga_twovar_wktemporal_512_to256:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: weeks_from_baseline
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+  metric_resize: [256, 256]
+
+# CANONICALIZED-LATERALITY variants of faf_ga_twovar_wktemporal_512: identical to it, but every LEFT
+# (OS) eye is horizontally mirrored to RIGHT (OD) orientation at load time (deterministic, NOT
+# augmentation), so the whole dataset shares one orientation. Experiment: does removing the OD/OS
+# orientation split make the shared INR easier to learn? Train/validate with _canonLR; the _to256
+# variant is for the S1/S2 eval (render 512 -> score 256), same as the non-canon _to256 above.
+faf_ga_twovar_wktemporal_512_canonLR:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: weeks_from_baseline
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+  canonicalize_laterality: true
+
+faf_ga_twovar_wktemporal_512_canonLR_to256:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: weeks_from_baseline
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+  metric_resize: [256, 256]
+  canonicalize_laterality: true
+
+# B) temporal axis = AgeatVisit. With time_as_input:true -> AgeatVisit is the time INPUT,
+#    weeks_from_baseline is the FiLM vector (cond_dims=1).
+faf_ga_twovar_agetemporal_512:
+  <<: *faf_ga
+  conditions:
+    AgeatVisit: true
+    weeks_from_baseline: true
+    lesion_size: false
+    lesion_count: false
+  temporal_condition: AgeatVisit
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null

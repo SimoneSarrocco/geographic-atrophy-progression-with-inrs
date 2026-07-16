@@ -1,0 +1,50 @@
+# --- Secrets: NEVER commit filled-in credentials ---
+configs/lakefs_cfg.yaml
+*.env
+.env
+
+# --- Data & caches (bring your own; see docs/DATA.md) ---
+data/*
+!data/.gitkeep
+cache/
+runs/
+ablations/runs/
+ablations/runs_*/
+
+# --- Model checkpoints / arrays / large binaries ---
+*.pth
+*.pt
+*.npz
+*.ckpt
+
+# --- Logs & experiment tracking ---
+wandb/
+tb_logs/
+events.out.tfevents.*
+*.log
+
+# --- Figures / rendered outputs ---
+*.png
+*.bmp
+*.pdf
+figures/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# --- Environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+.DS_Store

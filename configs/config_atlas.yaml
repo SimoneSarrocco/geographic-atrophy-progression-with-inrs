@@ -1,0 +1,300 @@
+root_dir: '' # if empty, use current working directory
+
+# --------- Logging Parameters ---------
+logging: False # if True, log to wandb
+output_dir: ./runs/faf_ga  # run dirs (checkpoints, reconstructions, TB logs, metric CSVs) go here
+wandb_entity: # wandb entity
+project_name: GAP-INR # wandb project name
+config_data: faf_ga_620 # name of the dataset to use (620 center-crop == comparison standard)
+
+# --------- Device Parameters ---------
+device: cuda
+device_dataset: cuda
+amp: False
+seed: 1927
+
+# --------- General Options ---------
+generate_cond_atlas: False # if True, generate the spatio-temporal (conditioned) atlas
+mask_reconstruction: False # mask inference reconstruction to remove noisy background
+save_certainty_maps: False # if True, save the certainty maps (tissue probability maps)
+compute_metrics: True # Re-enabled after 2D fixes
+save_imgs: # if True, save the reconstruction images for the training/validation/test set
+  train: True
+  val: True
+  test: True
+save_model: True # if True, save the model to output_dir
+load_model: 
+  path: ""  
+  epoch: 1 # which epoch to load
+
+# --------- Data Augmentation Parameters ---------
+data_augmentation:
+  activate: false   # Phase-1 step 1: OFF to first reproduce the known-good baseline. Turn ON (mode:
+                    # pseudo_eye, horizontal_flip) as the Phase-1.3 generalisation ablation.
+  # 'pseudo_eye' (recommended for the spatial-latent INR): each augmented copy of a TRAIN patient-eye
+  # becomes a NEW patient-eye with its OWN latent, and the SAME deterministic transform is applied to
+  # ALL of that eye's visits (so the shared latent + longitudinal signal stay consistent). The decoder
+  # then sees more orientations/scales/contrasts -> better generalisation for recon-only TTA.
+  # 'stochastic' = legacy per-load translation/noise on the same latent (uses augment_translation/noise).
+  mode: 'pseudo_eye'
+  n_augmentations: 1        # number of augmented pseudo-eyes per train eye (0 = off). 2 -> 3x the eyes.
+  # --- Geometric (applied to FAF + mask together, identically across an eye's visits) ---
+  horizontal_flip: true     # OD<->OS mirror — anatomically valid for retina. (Vertical flip is NOT, so it's not offered.)
+  rotation_deg: 5.0        # max |rotation| degrees (acquisition tilt); 0 disables
+  translation_frac: 0    # max translation as a fraction of image size; 0 disables
+  scale: 0               # max +/- relative zoom; 0 disables
+  # --- Intensity (FAF only) ---
+  gamma: 0                # gamma sampled from [1-gamma, 1+gamma]; 0 disables
+  brightness: 0           # additive brightness in [-b, b] (normalised units); 0 disables
+  noise_std: 0.02           # additive Gaussian noise std (normalised units); 0 disables
+  # --- Legacy stochastic-mode params (only used when mode: 'stochastic') ---
+  augment_translation:
+    p: 0.3
+    max_shift: 5
+  augment_noise:
+    p: 0.3
+    mean: 0.0
+    std: 0.05
+
+# --------- Optimizer Parameters ---------
+optimizer:
+  re_init_latents: False # if True, re-initialize latent codes from gaussian distribution after each epoch
+  lr_inr: 1.0e-4        # Phase-1 baseline (matches the best prior run run_20260602_135122_loc). NOTE the
+                        # '.0': PyYAML parses bare '1e-4' as a STRING (needs a decimal point), which then
+                        # crashes Adam's weight-decay step ('1e-4' * wd -> TypeError). Keep the .0.
+  inr_weight_decay: 0.1
+  lr_latent: 5.0e-3       # EXACT-REPRO of run_20260622_153015_loc (good run used 5e-3, NOT 5e-4)
+  val_latent_init: 'random' # 'random' = N(0, 0.01), 'nearest_train' = copy nearest training latent (by temporal condition), 'population_mean' = mean of all training latents
+  latent_weight_decay: 0.1
+  # Anchored L2 regularisation of the latent during val/test TTA (the latent is fit on recon only,
+  # which is under-determined; this keeps it near its init prior, i.e. in the seg-valid region).
+  # Anchor follows val_latent_init: 0 for 'random', the population mean for 'population_mean', the
+  # nearest-train latent for 'nearest_train'. 0.0 disables. The term is logged as 'latent_reg' (mean
+  # of squared deviations) so you can calibrate it against the reconstruction loss.
+  val_latent_reg: 0.01     # Phase-1: off (clean baseline). A Phase-1.3 generalisation knob to ablate.
+  # lr_tf: 7.5e-3
+  # tf_weight_decay: 0.0
+  # tf_weight: 0.0
+  loss_metric: 'mse'  # either 'mse' or 'l1' implemented at the moment
+  seg_weight_zero_prob: 0.0 # Probability to randomly set seg_weight to 0 during training (e.g., 0.5 = 50% chance)
+  # Segmentation weight. Raising it gives segmentation more importance, so the decoder becomes a
+  # stronger seg prior that recon-only TTA can read off. Don't over-raise it: if reconstruction
+  # degrades, the recon-only TTA latent lands further from the seg-friendly region and TTA
+  # segmentation can get worse, so keep reconstruction meaningful.
+  seg_weight: 1.0         # Phase-1 baseline value (raise later only if seg underperforms)
+  sr_weight: 10.0  # EXACT-REPRO: good run run_20260602_135122_loc had no sr_weight (recon weight = 1, so the
+                  # CE seg term dominated -> strong train seg, train DICE 0.977). sr_weight: 10 was a later change
+                  # that de-emphasised seg; reverting to 1.0 to reproduce. (Re-raise as a deliberate ablation.)
+  # Soft-Dice term added to the segmentation loss (final seg loss = CrossEntropy + seg_dice_weight * Dice).
+  # Dice is robust to the heavy class imbalance of small GA lesions. 0.0 -> pure CrossEntropy (original).
+  seg_dice_weight: 1.0    # EXACT-REPRO: good run used pure CrossEntropy (no Dice term). Re-enable as an ablation.
+  # Tversky option for the segmentation loss (generalises Dice): TI = TP/(TP + alpha*FP + beta*FN),
+  # loss = 1 - TI, added to CrossEntropy. alpha>beta penalises FALSE POSITIVES more strongly ->
+  # fewer spurious GA pixels far from the real lesion. When activate=true it REPLACES the Dice term
+  # (Dice == Tversky with alpha=beta=0.5).
+  seg_tversky:
+    activate: false       # set true to use Tversky instead of (CE-only / CE+Dice)
+    alpha: 0.7            # false-positive weight (raise to suppress far-from-lesion FP)
+    beta: 0.3             # false-negative weight (alpha + beta need not sum to 1)
+    weight: 1.0           # weight of the Tversky term added to CrossEntropy
+  seg_loss_val: true      # Phase-1: seg-supervised TTA on the acquired/optimisation visits (legitimate when
+                          # baseline masks are available clinically). The held-out FUTURE visit stays label-free
+                          # and is the true generalisation measure. Set false for the Phase-2 label-free track.
+  # Early stopping for validation/test-time latent optimisation. The val latents are fit with
+  # the reconstruction loss only (seg_loss_val: false), so the segmentation DICE on the
+  # optimisation visits peaks and then degrades as the latents overfit the image intensities.
+  # We monitor that DICE every inner epoch and keep the latents from the best inner epoch.
+  val_early_stopping:
+    activate: true      # EXACT-REPRO of run_20260622_153015_loc (kept best-inner-epoch latents).
+    patience: 10       # EXACT-REPRO: good run used patience 10
+    min_delta: 0.0      # minimum DICE increase (over the running best) to count as an improvement
+  scheduler:
+    type: 'cosine'
+    eta_min: 2.5e-5
+
+
+# --------- INR Decoder Parameters ---------
+inr_decoder:
+  architecture: "siren"  # "siren"
+  tf_dim: 0 # 0 = off, 6 = rigid, 9 = rigid + scaling
+  cnn_kernel_size: 0 # CNN modulator on the latent grid (Phase-1: matches best prior run). Spatially mixes the
+                     # 16x16 latent so the decoder can render detail; with kernel 0 a small grid renders blurry.
+  latent_dim: [64, 32, 32] # STANDARD config (== comparison c01): [C,H,W]=64x32x32 per eye.
+  in_dim: 2 # purely spatial coordinates (x, y, z) for 3D OCT; (x, y) for 2D.
+  cond_dims: 1 # Conditional dimension placeholder, set via dataset config
+  cond_encoding: 'raw' # how to encode the conditioning variable: 'fourier' | 'mlp' (learned smooth embedding) | 'raw'
+  cond_num_frequencies: 0  # Fourier bands for the conditioning variable (only used when cond_encoding='fourier'). Low -> smooth temporal interpolation/extrapolation. (was 32: aliasing/noise on a single time scalar)
+  cond_mlp_hidden: 32 # hidden width of the MLP condition embedding (only used when cond_encoding='mlp')
+  cond_mlp_out: 32    # output dim of the MLP condition embedding (only used when cond_encoding='mlp')
+  cond_mlp_layers: 2  # number of layers in the MLP condition embedding (only used when cond_encoding='mlp')
+  time_as_input: false # if true, temporal condition enters as INR input coordinate
+  time_encoding: 'raw' # 'fourier' or 'raw'
+  time_num_frequencies: 0 # Fourier frequencies for temporal encoding --> specific for the time info when used as input together with the spatial coordinates
+  out_dim: [1, 2] # (number of intensity modalities, number of segmentation channels). Use [1, 2] for FAF+GA.
+  # (a) Per-image, per-channel min-max stretch of the reconstructed SR image(s) to [0,1] at inference
+  # (the original GAP-INR behaviour). The decoder often emits a compressed range; without this the
+  # reconstructions show/measure washed-out. True reproduces the sharp run; set false to see raw output.
+  renormalize_output: true
+  # Hard-mask threshold on P(GA) for BINARY segmentation (BG, GA). argmax == threshold 0.5; a higher
+  # value (0.7) keeps only confident GA pixels and suppresses low-confidence false positives far from
+  # the real lesion. Applies at inference -> used by all metrics (DICE/Precision/Recall/IoU) and
+  # figures. Ignored for multi-class seg (falls back to argmax). 0.5 reproduces the old behaviour.
+  seg_threshold: 0.5
+  # Connected-component cleanup of the binary GA mask at inference (2D). GA is anatomically
+  # contiguous, so dropping tiny/spurious islands and/or keeping only the largest component removes
+  # unrealistic far-from-lesion false positives. Propagates to all metrics and figures. keep_largest
+  # keeps only the single biggest GA blob; min_area_px removes components below that pixel count.
+  seg_postprocess:
+    activate: false
+    keep_largest: false
+    min_area_px: 0
+  # NO segmentation head (original behaviour): when true, a SINGLE shared output layer maps to
+  # [recon | seg] together, instead of separate recon/seg heads. The seg_head_* and seg_branch options
+  # below are IGNORED in this mode. Channel order is unchanged (recon first, then seg), so metrics/
+  # plotting are unaffected. false -> separate heads (current default).
+  shared_output_layer: false
+  # Segmentation head capacity. A single linear map from penultimate SIREN features is weak for a hard
+  # lesion task. With seg_head_num_layers > 0 the seg head becomes a small ReLU MLP; seg_head_use_last_features
+  # additionally feeds it the last-layer features (richer representation). num_layers = 0 -> original linear head.
+  seg_head_num_layers: 0      # 0 = single linear layer (original); >0 = ReLU MLP with this many hidden layers
+  seg_head_hidden_size: 256   # hidden width of the seg-head MLP (only used when seg_head_num_layers > 0)
+  seg_head_use_last_features: true  # also feed the last-layer features (not just penultimate) to the seg head
+
+  # Dedicated segmentation BRANCH (option B): a short SIREN sub-network that taps a mid-trunk layer
+  # (default: penultimate) and is FiLM-modulated by the latent, then a final seg linear. Shares the
+  # trunk up to the branch point but decodes labels through its own layers -> more seg capacity /
+  # decoupling than the seg_head above, while keeping the MetaSeg shared-representation premise.
+  # When activate=true this REPLACES the penultimate-tap seg_head (seg_head_* are ignored).
+  seg_branch:
+    activate: false     # Phase-1: OFF (use the simple seg head, closest to the best prior run; fewer confounds).
+                        # Re-enable as a Phase-1.3/2 ablation if segmentation needs more capacity.
+    num_layers: 1       # number of seg-specific SineLayers in the branch (0 = just the final linear)
+    hidden_size: 512    # width of the branch SineLayers
+    branch_layer: -1    # trunk layer index whose output feeds the branch; -1 = penultimate
+    modulate: true      # FiLM-modulate the branch layers with the latent (as in the trunk)
+  hidden_size: 384 # EXACT-REPRO of run_20260622_153015_loc (good run used 384, NOT 512/1024).
+  num_hidden_layers: 7 # number of hidden layers of the MLP (used by siren)
+  modulated_layers: [0, 1, 2, 3, 4, 5, 6, 7] # FiLM-modulated layers (layer 0 excluded, as in the best prior run).
+  # FAF-GA — restored to the good run's (run_20260602_135122) effective values. That run predates
+  # omega_scheduler.py (created 2026-06-03) and used the original siren (f_om=30 first layer, h_om=100
+  # for ALL hidden layers). The scheduler then reinterpreted omega:[30,100] as a RAMP 30->100, and the
+  # config had drifted further to first=80 / hidden=30 (omega_start=omega_end=30) -> hidden layers ran
+  # at omega=30, far below the 100 the sharp run used. Low hidden omega = SIREN biased to low spatial
+  # frequency -> only coarse shape + dark GA blob, no vessels/texture, and it never recovers over epochs.
+  # 'constant' => every hidden layer uses omega_end; first layer uses omega_0. This reproduces f_om=30,
+  # h_om=100. (To re-enable a ramp, set schedule_type 'linear' and omega_start<omega_end.)
+  omega_0: 30          # first layer (the good run used 30, not 80)
+  omega_start: 30     # ignored for schedule_type 'constant'; kept = omega_end for clarity
+  omega_end: 30       # ALL hidden layers run at this omega (matches the sharp run's h_om=100)
+  schedule_type: 'constant'  # 'linear' | 'exponential' | 'constant'
+
+
+# --------- Coordinate Encoding Parameters ---------
+encoding:
+  activate: false
+  type: 'none' # 'hash', 'fourier', 'gaussian', or 'none'
+  # Hash Grid parameters
+  n_levels: 16
+  n_features_per_level: 8
+  log2_hashmap_size: 19
+  base_resolution: 8
+  finest_resolution: 768
+  # Fourier/Gaussian parameters (examples)
+  # num_frequencies: 10
+  # scale: 10.0
+
+
+
+
+# --------- Atlas Generation Parameters ---------
+atlas_gen:
+  spacing: [1.0, 1.0] # spacing of the atlas in mm (3D for OCT; use [1.0, 1.0] for 2D)
+  temporal_values: [70, 80, 90] # reasonable age range for FAF-GA
+  future_offsets_weeks: [12, 24, 36] # offsets (in weeks) for extrapolating future visits (e.g., predict new visit 24 weeks after the very last one)
+  conditions: # conditions to use for the atlas generation (must be specified and activated in config_data.yaml)
+  # the conditions are combined with each temporal values --> exponential increase of combinations with each condition!!
+    # birth_age: # condition name as stated in config_data.yaml
+    #   values: [26, 31, 36, 41] # values to combine with the temporal values
+    #   normed_values: False # if False, steps are specified in dataframe values, i.e., not normalized
+    # lv_volume_normed:
+    #   values: [-1.25, -0.75, 0, 0.75, 1.25]
+    #   normed_values: True # if True, steps are specified in normalized values [-1, 1]
+    AgeatVisit:
+     values: [50, 70, 90]
+     normed_values: False
+    # lesion_size:
+    #  values: [0.5, 3.0, 8.0]
+    #  normed_values: False
+    # lesion_count:
+      # values: [1, 3, 5]
+      # normed_values: False
+    weeks_from_baseline:
+     values: [12, 24, 48]
+     normed_values: False
+
+  # --- Mean Latent Regression ---
+  gaussian_span: 1.0 # in weeks. +/- weeks of scan age to cover 95% of the weights,
+                     # i.e. 95% of the latent code of an atlas of age 30 weeks is made up
+                     # of latent codes from subjects with scan age 30 +/- 0.75 weeks, [29.25, 30.75]
+  cond_scale: 1.0   # scaling factor for the condition vector
+                     # to adjust condition value range to latent code value range
+
+
+# --------- Latent Space Analysis ---------
+latent_anaylsis: # to predict scan_age from latentcode or explicit conditions during test-time
+  activate: False
+  predict_age_at_visit: 'none' #NCA, none for no prediction
+  predict_birth_age: 'none' #NCA, none for no prediction, used for implicit birth-age prediction from latent code for ablation study.
+  predict_ext_condition: 'none' #'MAE'  # predict a condition for test-time subjects, MAE for birth-age, binary crossentropy for sex, none for no prediction
+  ba_regression:
+    activate: False
+    lr: 5.0e-4
+    epochs: 1000
+
+
+# --------- Validation Parameters ---------
+validation:
+  activate: true            # whether to perform validation during training
+  train_eval_every: 5     # EXACT-REPRO of run_20260622_153015_loc (good run used 10).
+  holdout_strategy: 'last'  # EXACT-REPRO: good run held out the LAST visit only (NOT leave_one_out).
+                            # 'last' = hold out last visit (default)
+                            # 'specific' = hold out the visit at position holdout_visit
+                            # 'leave_one_out' = iterate over all visit positions, holding out one at a time
+  holdout_visit: null       # 1-indexed chronological position of the visit to hold out
+                            # only used when holdout_strategy = 'specific'
+                            # e.g., 2 = hold out the 2nd chronological visit
+
+# --------- Test Parameters ---------
+test:
+  # EXACT-REPRO: good run had no test split (old CSV split is train/val only). Re-enable after you
+  # apply the new patient-wise split (add_split_column.py): runs a final TTO pass on the held-out
+  # test split, loading checkpoint_best.pth (best val-eval DICE).
+  activate: true
+                            # Single-visit test eyes are optimised on their lone visit (clinical case);
+                            # multi-visit eyes hold out the last visit (per validation.holdout_strategy).
+
+# --------- Training Parameters ---------
+n_subjects: # number of unique patient-eyes to use for training/validation/test (these are CAPS;
+            # only 30 train / 7 val eyes exist, so 1000/500 == "use all" -- same as the good run)
+  train: 1000  # EXACT-REPRO of run_20260622_153015_loc
+  val: 500     # EXACT-REPRO
+  test: 500    # EXACT-REPRO (no test eyes in subject_ids.yaml, so this is a no-op)
+epochs: # number of epochs for training/validation
+  train: 100  # EXACT-REPRO of run_20260622_153015_loc
+  val: 25     # EXACT-REPRO: good run ran 100 inner TTA epochs (NOT 25) -> much better latent fits
+validate_every: 2  # Standard is 20; set to 2 here for a HIGH-RESOLUTION val curve to inspect whether
+                   # held-out scores genuinely degrade over epochs (vs being undersampled at every-20).
+batch_size: 1 # batch size for training/validation (number of subjects per batch)
+n_samples: 10000 # number of coordinates in each "inner_batch" sampled across the subject batch
+num_workers: 16 # number of workers for dataloadern
+
+
+# --------- Lesion Size Analysis (Individual and Population Growth) ---------
+lesion_analysis:
+  activate: true                     # whether to run lesion analysis at validation epochs
+  save_individual_plots: true       # whether to save individual progression curves during training
+  save_individual_plots_final: true  # whether to save individual progression curves at the final epoch
+  max_individual_plots: 99999           # limit individual plots to at most 10 subjects to prevent disk/time bloat
+  splits: ['val']                    # which splits to analyze (== comparison standard: held-out val lesion MAE)
+
+
