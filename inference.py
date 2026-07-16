@@ -12,10 +12,18 @@ def parse_inference_args():
                "with, otherwise the weights will not load. Pass --config_model <file> when the "
                "checkpoint was not trained with configs/config_model.yaml; "
                "verify_run_config.py --checkpoint <ckpt> prints what a checkpoint used.")
-    parser.add_argument("--config_data", type=str, default="faf_ga", help="Dataset configuration")
+    parser.add_argument("--config_data", type=str, default=None,
+                        help="Override the dataset section in config_data.yaml. If omitted, the "
+                             "config_data field inside the --config_model file is used (as in run.py). "
+                             "A section whose enabled `conditions` differ from the checkpoint's "
+                             "changes cond_dims, and the weights will not load.")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint (.pth)")
     parser.add_argument("--n_subjects", type=int, default=10, help="Number of subjects to evaluate")
-    parser.add_argument("--split", type=str, default="val", choices=["train", "val", "test"], help="Dataset split to evaluate")
+    parser.add_argument("--split", type=str, default="val", choices=["train", "val", "test"],
+                        help="Split that --n_subjects caps. This does NOT choose what runs: the "
+                             "validation routine always evaluates val (and train, per "
+                             "validation.train_eval_every), and the test split is evaluated when "
+                             "test.activate is true in the config. Use evaluate.py to target a split.")
     parser.add_argument("--output_name", type=str, default="inference_run", help="Name for the output directory")
     
     # Allow overriding any config parameter via --key__subkey value
