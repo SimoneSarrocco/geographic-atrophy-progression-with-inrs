@@ -123,6 +123,7 @@ components in the GA mask.
 | `models/` | SIREN trunk, INR decoder, condition/time encoders, ω scheduler. |
 | `data_loading/` | Dataset, coordinate sampling, preprocessing, optional remote (lakeFS) loader. |
 | `preprocessing/` | Scripts that build the clinical CSV and the train/val/test split. |
+| `baselines/imageflownet/` | The paper's comparison methods (ImageFlowNet family), on the same split and scoring grid. Separately licensed — see below. |
 | `docs/` | Documentation (see below). |
 | `utils.py` | Shared library (loss, grids, image IO, logging, figure helpers). |
 
@@ -306,5 +307,9 @@ See [`configs/README.md`](configs/README.md).
 ## Attribution, license, citation
 
 This work builds on a prior open-source conditional-INR framework; see
-[`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0).
-Citation details for the paper will be added on publication.
+[`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
+**except** `baselines/imageflownet/`, which is a derivative of ImageFlowNet and carries the Yale
+Non-Commercial licence shipped with it
+([`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md)); that code is for
+non-commercial research or evaluation only. Citation details for the paper will be added on
+publication.

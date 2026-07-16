@@ -1,0 +1,5 @@
+# Baseline outputs (see README.md). The repo-root .gitignore already covers checkpoints
+# (*.pth/*.pt), figures (*.png) and __pycache__; these are the paths specific to this subtree.
+results/
+checkpoints/
+*.pty

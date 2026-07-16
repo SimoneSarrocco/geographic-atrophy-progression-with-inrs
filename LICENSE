@@ -201,3 +201,15 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+-----------------------------------------------------------------------
+
+   SCOPE OF THIS LICENSE
+
+   The Apache License above covers this repository EXCEPT for the
+   directory `baselines/imageflownet/`, which is a derivative of the
+   ImageFlowNet project and is governed instead by the Non-Commercial
+   License in `baselines/imageflownet/LICENSE.md` (Yale University).
+   That license does not permit commercial use. Files vendored under
+   `baselines/imageflownet/external_src/` carry their own upstream
+   licenses; see `baselines/imageflownet/ATTRIBUTION.md`.

@@ -41,7 +41,7 @@ def _load_metric_json(path):
 
 
 def _load_mask_512(path, crop, res):
-    """Load a GA mask the SAME way eval_omega does: center-crop `crop` (620) then resize to
+    """Load a GA mask the SAME way the ImageFlowNet baselines' eval_faf_ga.py does: center-crop `crop` (620) then resize to
     `res` (512) NEAREST, binarise >127. So GAP-INR's growth uses identical masks to ImageFlowNet."""
     from PIL import Image
     m = Image.open(path).convert("L")
@@ -59,7 +59,7 @@ def _dsc(a, b):
 def _eye_growth(data_csv, crop, res):
     """{eye_id: [growth per chronological visit]} where growth[k] = 1 - DSC(mask[k-1], mask[k])
     from the RAW GT masks (growth[0] uses mask[0]<->mask[1]). GT-only, so identical across methods
-    and matched to ImageFlowNet's eval_omega definition. The k-th value aligns with the eye's k-th
+    and matched to the ImageFlowNet baselines' eval_faf_ga.py definition. The k-th value aligns with the eye's k-th
     held-out position (by RANK), which is robust to 0- vs 1-based holdout numbering."""
     df = pd.read_csv(data_csv).dropna(subset=["ga_mask_path"])
     sort_col = "Visit_Number" if "Visit_Number" in df.columns else None
@@ -136,7 +136,7 @@ def main():
                     default=["DICE", "Precision", "Recall", "IoU", "HD", "PSNR", "SSIM", "LPIPS", "LOSS"])
     # Optional minor/major GA-growth stratification (ImageFlowNet Table 1 framing). Pass the data
     # CSV (with ga_mask_path) to enable it; growth = 1 - DSC(prev visit, held-out visit) from the GT
-    # masks, identical to eval_omega. Off by default -> existing summary is unchanged.
+    # masks, identical to the ImageFlowNet baselines. Off by default -> existing summary is unchanged.
     ap.add_argument("--data_csv", default=None, help="data CSV to enable minor/major-growth buckets")
     ap.add_argument("--crop_size", type=int, default=620)
     ap.add_argument("--score_res", type=int, default=512)

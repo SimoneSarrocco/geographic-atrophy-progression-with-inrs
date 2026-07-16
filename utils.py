@@ -1274,7 +1274,7 @@ def compute_seg_overlap_metrics(pred, ref, bg_label):
         prec_s.append(1.0 if (tp + fp) == 0 else tp / (tp + fp))
         rec_s.append(1.0 if (tp + fn) == 0 else tp / (tp + fn))
         iou_s.append(1.0 if (tp + fp + fn) == 0 else tp / (tp + fp + fn))
-        # Hausdorff distance (grid pixels) with eval_omega's empty-mask convention: both-empty -> 0;
+        # Hausdorff distance (grid pixels) with the ImageFlowNet baselines' empty-mask convention: both-empty -> 0;
         # one-empty -> the array diagonal (max possible distance); else skimage HD.
         if not pm.any() and not rm.any():
             hd_s.append(0.0)

@@ -1,0 +1,10 @@
+# Extra dependencies for the ImageFlowNet-family baselines, on top of the repo-root
+# requirements.txt (torch, numpy, scipy, pandas, scikit-image, matplotlib, tqdm, opencv-python).
+#   pip install -r requirements.txt -r baselines/imageflownet/requirements.txt
+
+monai>=1.2          # DynUNet (the shared GA segmentor)
+torchdiffeq>=0.2    # neural-ODE solver (ImageFlowNetODE)
+torchsde>=0.2       # SDE solver (imported by the model registry)
+torchcde>=0.2       # controlled-differential-equation utilities
+torch_ema>=0.3      # EMA of weights (I2SBUNet)
+albumentations>=1.3 # training-time augmentation

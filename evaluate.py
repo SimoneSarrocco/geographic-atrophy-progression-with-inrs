@@ -310,7 +310,7 @@ def main():
                "--eval_dir", args["output_dir"]]
         # Pass the frozen data CSV so summarize_eval also emits the minor/major GA-growth buckets
         # (ImageFlowNet framing). Growth uses the CANONICAL 620->512 mask grid (summarize_eval's
-        # defaults), identical to eval_omega, so the buckets are method-independent -- regardless of
+        # defaults), identical to the ImageFlowNet baselines' eval_faf_ga.py, so the buckets are method-independent -- regardless of
         # whether this GAP-INR run itself scores at 620 or 512.
         _csv = (args.get("dataset") or {}).get("tsv_file")
         if _csv:
