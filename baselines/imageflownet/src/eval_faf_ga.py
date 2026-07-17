@@ -19,7 +19,7 @@ GAP-INR lesion-area MAE (mm^2). A COPY-FORWARD reference (predict = source) is s
 
 It rebuilds the same config/model as train_2pt_all.py (so checkpoints resolve), loads the
 chosen best checkpoint, applies the shared segmentor, and writes
-``<run>/leave_one_out_summary_test.csv`` plus per-pair rows.
+``<run>/leave_one_out_summary_test_<best_type>.csv`` plus per-pair rows.
 
 All metrics are scored on the NATIVE 512 grid -- no upsampling of the prediction. The loader
 center-crops 620 from the native 768 (which preserves GA; a direct 512 crop would clip GA in
@@ -137,16 +137,26 @@ def _faf_to01(faf_norm):
 
 
 _LPIPS_NET = None
+_LPIPS_DISABLED = False
 
 
 def _lpips(pred01, gt01, device):
     '''LPIPS (AlexNet) perceptual distance between two HxW images in [0, 1] (lower is better).
     LPIPS expects (N, 3, H, W) in [-1, 1]; the single FAF channel is replicated to 3. The net is
-    built once and cached. Same prediction/GT the PSNR/SSIM see (so all three are consistent).'''
-    global _LPIPS_NET
+    built once and cached. Same prediction/GT the PSNR/SSIM see (so all three are consistent).
+    Returns None if lpips is unavailable (it needs the package and a one-off AlexNet weight
+    download), so the rest of the metrics still report.'''
+    global _LPIPS_NET, _LPIPS_DISABLED
+    if _LPIPS_DISABLED:
+        return None
     if _LPIPS_NET is None:
-        import lpips as _lpips_pkg
-        _LPIPS_NET = _lpips_pkg.LPIPS(net='alex', verbose=False).to(device).eval()
+        try:
+            import lpips as _lpips_pkg
+            _LPIPS_NET = _lpips_pkg.LPIPS(net='alex', verbose=False).to(device).eval()
+        except Exception as e:
+            print('LPIPS unavailable (%s); reporting None for it.' % e)
+            _LPIPS_DISABLED = True
+            return None
 
     def _t(a):
         t = torch.from_numpy(np.ascontiguousarray(a)).float()[None, None].to(device)  # (1,1,H,W) [0,1]

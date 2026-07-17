@@ -14,6 +14,23 @@ _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_CONFIG_DATA = os.path.join(_REPO_ROOT, 'configs', 'config_data.yaml')
 
 
+def _yaml_safe(obj):
+    """Recursively coerce a config tree to plain YAML-dumpable types, so a live object anywhere in it
+    (a writer handle, a numpy scalar) degrades to its repr instead of failing the whole dump."""
+    if isinstance(obj, dict):
+        return {str(k): _yaml_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_yaml_safe(v) for v in obj]
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if hasattr(obj, 'item') and getattr(obj, 'size', None) == 1:   # 0-d numpy/torch scalar
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    return repr(obj)
+
+
 def initial_setup(cmd_args=None):
     config_model_path = (cmd_args or {}).get('config_model') or \
         os.path.join(_REPO_ROOT, 'configs', 'config_model.yaml')
@@ -51,11 +68,15 @@ def initial_setup(cmd_args=None):
     os.makedirs(args['output_dir'], exist_ok=True)
     print(f"Output directory: {args['output_dir']}")
 
-    # save config files
+    # Save the config files as given, plus the RESOLVED config: args_data/args_model are the files as
+    # read from disk, so any --flag override (--seed, --inr_decoder__hidden_size, ...) is absent from
+    # them. config_resolved.yaml is what the run actually used, and is the one to reproduce from.
     with open(os.path.join(args['output_dir'], 'config_data.yaml'), 'w') as f:
         yaml.dump(args_data, f)
     with open(os.path.join(args['output_dir'], 'config_model.yaml'), 'w') as f:
         yaml.dump(args_model, f)
+    with open(os.path.join(args['output_dir'], 'config_resolved.yaml'), 'w') as f:
+        yaml.dump(_yaml_safe(args), f, default_flow_style=False)
     print(f"Saved config files to {args['output_dir']}")
 
     has_seg = args['inr_decoder']['out_dim'][-1] > 0

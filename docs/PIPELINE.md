@@ -8,7 +8,7 @@ Run the whole sequence with one command:
 ```bash
 ./run_pipeline.sh                 # picks a free GPU, then trains, evaluates, diagnoses
 ./run_pipeline.sh --gpu 3         # force a GPU
-./run_pipeline.sh --skip-train --run runs/faf_ga_YYYYMMDD_HHMMSS_loc   # eval + diagnose an existing run
+./run_pipeline.sh --skip-train --run runs/faf_ga/faf_ga_twovar_wktemporal_512_YYYYMMDD_HHMMSS_loc   # eval + diagnose an existing run
 ./run_pipeline.sh --stages eval,tsens --run <dir>                    # only some stages
 ```
 
@@ -20,8 +20,8 @@ Everything lands under the run dir (`runs/<run_name>/`): checkpoints, `tb_logs/`
 ## Loss is not the selection metric
 
 - Train loss is uninformative: the per-eye latents memorize the training eyes, so it always goes low.
-- Val loss is the reconstruction loss of a recon-only-fit latent. It measures pixel fit, not whether
-  the predicted future GA is right; reconstruction and segmentation come apart.
+- Val loss is the loss of a latent fit on the eye's acquired visits. It measures fit to those visits,
+  not whether the predicted future GA is right; reconstruction and segmentation come apart.
 - Both are dominated by the roughly 95% background. GA is about 5% of pixels, so the lesion barely
   moves the loss.
 
@@ -41,9 +41,12 @@ python run.py --config_model configs/config_model.yaml
 - `validate_splits()` runs first and aborts if train/val/test overlap or the split is inconsistent.
 - Checkpoints: `checkpoint_best.pth` (best held-out validation DICE) plus `checkpoint_epoch_*.pth`
   every `validate_every` epochs.
-- With `test.activate: true`, a final test leave-one-out pass runs at the end of training.
+- With `test.activate: true`, a final test pass runs at the end of training, using
+  `validation.holdout_strategy` (shipped as `'last'`, i.e. a single last-visit round). Full
+  leave-one-out on test comes from `evaluate.py --holdout_strategy leave_one_out --test on`, which is
+  what produces the reported numbers.
 
-What to watch in TensorBoard (`tensorboard --logdir runs/<run>/tb_logs`), in order of usefulness:
+What to watch in TensorBoard (`tensorboard --logdir runs/faf_ga/<run>/tb_logs`), in order of usefulness:
 
 1. `val_eval_*/dice` (held-out GA DICE) and the interpolation-vs-extrapolation split. This is the
    signal to select on.
@@ -61,7 +64,7 @@ Decide training length from the held-out-DICE curve rather than the loss. If the
 
 ```bash
 # val (selection) + test (final), full leave-one-out, auto-summarized:
-python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
+python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
     --holdout_strategy leave_one_out --test on
 ```
 
@@ -82,9 +85,9 @@ This check holds each eye's latent fixed and sweeps only the week, which isolate
 the train split it needs no TTA, since the latents come from the checkpoint.
 
 ```bash
-python temporal_sensitivity.py --checkpoint runs/<run>/checkpoint_best.pth --split train
+python temporal_sensitivity.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth --split train
 # val/test (fits latents on all visits first):
-python temporal_sensitivity.py --checkpoint runs/<run>/checkpoint_best.pth --split test
+python temporal_sensitivity.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth --split test
 ```
 
 Outputs (`temporal_sensitivity_*/`):
@@ -115,7 +118,7 @@ rates.
 
 ```bash
 python plot_trajectories.py \
-    --csv runs/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
+    --csv runs/faf_ga/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
 ```
 
 It writes `*_overlay.png` (all eyes, colored by ground-truth slope, held-out visit marked) and

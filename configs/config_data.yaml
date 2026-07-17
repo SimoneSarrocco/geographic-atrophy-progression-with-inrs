@@ -185,8 +185,9 @@ faf_ga_620:
 # a DIRECT 512 center-crop would clip GA in 5/133 visits (max GA half-extent 302px -> needs >=604).
 # crop_before_resize centre-crops native 768->620 (no GA clip), then resizes the crop to world_bbox
 # 512 (mask NEAREST, FAF bilinear). sampling_bbox null -> coordinate sampling on the full 512 image;
-# no upsampling anywhere. Lesion area = (#GA px on the 512 grid) * ScaleXSlo*ScaleYSlo (raw), the
-# IDENTICAL convention used by every 512-scored baseline. Use this for the baseline-comparison runs.
+# no upsampling anywhere. Lesion area = (#GA px on the 512 grid) * ScaleXSlo*ScaleYSlo * (620/512)^2,
+# the (620/512)^2 restoring native pitch after the resize -- the IDENTICAL convention used by every
+# 512-scored baseline. Use this for the baseline-comparison runs.
 faf_ga_512:
   <<: *faf_ga
   crop_before_resize: [620, 620]

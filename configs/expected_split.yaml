@@ -1,7 +1,7 @@
-_comment: 'Canonical paper split, loader-faithful (resolve_split_eyes: modality-present rows
-  only). validate_splits ABORTS if a run resolves a different partition, guarding against silent
-  split drift. Eye IDs are anonymized placeholders (EYE01_OD ...); replace with your own if you
-  use a different cohort. See docs/DATA.md.'
+_comment: 'Canonical paper split (26 train / 5 val / 6 test), loader-faithful (resolve_split_eyes:
+  rows with the modality columns the loader reads). validate_splits ABORTS if a run resolves a
+  different partition, guarding against silent split drift. Eye IDs are anonymized placeholders
+  (EYE01_OD ...); replace with your own if you use a different cohort. See docs/DATA.md.'
 id_column: Eye_ID
 split_column: split
 tsv_file: './data/clinical_metadata.csv'
@@ -17,6 +17,7 @@ splits:
   - EYE10_OD
   - EYE11_OD
   - EYE12_OD
+  - EYE12_OS
   - EYE13_OS
   - EYE14_OD
   - EYE15_OS

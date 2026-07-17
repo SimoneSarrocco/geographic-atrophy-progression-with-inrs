@@ -12,16 +12,37 @@ import yaml
 import copy
 
 
+def _seg_path_is_reconstructed(args):
+    """True when the segmentation mask path is rebuilt from Patient_ID/Eye/Visit_ID rather than read
+    from its CSV column -- the condition Data.resolve_path uses to pick the grader-mask branch."""
+    ds = args['dataset']
+    if ds.get('dataset_name') != 'faf_ga':
+        return False
+    if not ds.get('modalities'):
+        return False
+    out_dim = args.get('inr_decoder', {}).get('out_dim') or []
+    if not (out_dim and out_dim[-1] > 0):
+        return False
+    return ds.get('mask_grader_mode', 'single') in ('majority', 'soft', 'augment')
+
+
 def resolve_split_eyes(args, split, df=None):
     """Resolve the set of Eye_IDs for `split` using the SAME precedence as
     Data.sample_subject_ids: the CSV `split_column` wins when it is set and present in the
-    dataframe; otherwise the subject_ids[split] list. Lightweight (CSV only, no LakeFS).
-    Returns (set_of_eye_ids, source_str)."""
+    dataframe; otherwise the subject_ids[split] list. A row counts only if the modality columns the
+    loader actually reads are populated (see _seg_path_is_reconstructed). Lightweight (CSV only, no
+    LakeFS). Returns (set_of_eye_ids, source_str)."""
     ds = args['dataset']
     idc = ds.get('id_column', 'Eye_ID')
     if df is None:
         df = pd.read_csv(ds['tsv_file'])
     modcols = [m for m in ds.get('modalities', []) if m in df.columns]
+    # Mirror Data.resolve_path: for faf_ga with a grader mode other than 'single', the segmentation
+    # modality (the LAST entry in `modalities`) is reconstructed from Patient_ID/Eye/Visit_ID and its
+    # CSV column is never read. Requiring that column here would drop eyes the loader trains on --
+    # e.g. an eye graded by 02/03 but not 01 has an empty ga_mask_path yet a valid majority mask.
+    if _seg_path_is_reconstructed(args) and modcols:
+        modcols = modcols[:-1]
     if modcols:
         df = df.dropna(subset=modcols)
     split_col = ds.get('split_column')

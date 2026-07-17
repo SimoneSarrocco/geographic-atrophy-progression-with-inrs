@@ -11,6 +11,7 @@ Runs are driven by a **two-file** YAML system merged into one dict at startup (`
 | `lakefs_cfg.example.yaml` | Template for the **optional** remote object-store credentials. Copy to `lakefs_cfg.yaml` (git-ignored) and fill in, or ignore entirely to read local files. |
 
 Select a dataset section on the command line (`python run.py --config_data faf_ga_620`) or via the
-`config_data:` field inside the chosen `--config_model` file. Any nested field can be overridden from
-the CLI with `--section__key value` (see `run.py`). Data paths are relative to the repo root by
+`config_data:` field inside the chosen `--config_model` file. A subset of nested fields can also be
+overridden from the CLI with `--section__key value` — `python run.py --help` lists exactly which;
+everything else is set in the YAML. Data paths are relative to the repo root by
 default; edit `tsv_file` in `config_data.yaml` to point at your CSV (see [`../docs/DATA.md`](../docs/DATA.md)).

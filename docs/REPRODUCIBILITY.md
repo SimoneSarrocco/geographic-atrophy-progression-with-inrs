@@ -23,7 +23,7 @@ reproduces the main result unchanged. Key hyperparameters:
 | Decoder | SIREN, `hidden_size: 384`, `num_hidden_layers: 7` (⇒ 8 sine layers), all FiLM-modulated (`modulated_layers: [0..7]`) |
 | SIREN frequency | `omega_0 = omega_start = omega_end = 30`, `schedule_type: constant` |
 | Latent | `latent_dim: [256, 32, 32]` (256 channels on a 32×32 grid), one per eye |
-| Conditioning | weeks-from-baseline as FiLM vector |
+| Conditioning | FiLM vector of two scalars: weeks-from-baseline (the temporal axis) and age at visit (`faf_ga_twovar_wktemporal_512`; `cond_dims` is derived from the enabled conditions at runtime) |
 | Heads / loss | FAF reconstruction (MSE) + GA segmentation (CE + Dice); `sr_weight: 10`, `seg_weight: 1` |
 | Optimization | `lr_inr: 1.0e-4`, `lr_latent: 5.0e-3`, `n_samples: 10000` |
 | Schedule | `epochs.train: 50`, `epochs.val: 25` (TTA budget) |
@@ -33,9 +33,12 @@ Train and evaluate it:
 
 ```bash
 python run.py
-python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
+python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
     --holdout_strategy leave_one_out --test on
 ```
+
+`<run>` is the timestamped directory `run.py` prints as `Output directory:` — it is nested under the
+config's `output_dir`, so the full path is `runs/faf_ga/faf_ga_twovar_wktemporal_512_<timestamp>_loc/`.
 
 `evaluate.py` writes `evaluation_*/leave_one_out_summary.csv` — held-out DICE / PSNR / SSIM and
 lesion-area MAE, grouped **interpolation vs extrapolation**. That is the GAP-INR row of the results
@@ -50,13 +53,25 @@ table.
 ## 2. Changing the model
 
 Every architectural knob is documented in `configs/config_model.yaml` and in the README's model
-architecture options. Change one at a time, either in a copy of the config or on the command line:
+architecture options. Change one at a time, in a copy of the config:
 
 ```bash
-python run.py --inr_decoder__latent_dim "[64, 32, 32]"   # smaller latent grid
-python run.py --inr_decoder__shared_output_layer true    # one shared output head
-python run.py --config_model path/to/your_config.yaml
+cp configs/config_model.yaml configs/my_config.yaml   # edit it, then:
+python run.py --config_model configs/my_config.yaml
 ```
+
+A few knobs are also exposed on the command line. These are the only ones `run.py` accepts; anything
+else must go in the config. List-valued flags take space-separated integers, not a bracketed string:
+
+```bash
+python run.py --inr_decoder__latent_dim 64 32 32   # smaller latent grid
+python run.py --inr_decoder__hidden_size 256
+python run.py --seed 1927
+```
+
+`python run.py --help` lists the full set (`--config_data`, `--config_model`, `--seed`, the
+`--inr_decoder__*` shape flags, `--model_gen__cond_scale`, `--n_subjects__*` and the `--overfit*`
+flags).
 
 Select on the validation leave-one-out metric, not on test.
 
@@ -64,17 +79,17 @@ Select on the validation leave-one-out metric, not on test.
 
 The comparison methods are the **ImageFlowNet family** (ImageFlowNet ODE, Time-conditioned U-Net,
 Time-aware diffusion), trained and evaluated on the **same split and test eyes**, at **256×256, seed
-1** (the paper configuration). The protocol is in [`BASELINES.md`](BASELINES.md). The baseline code is
-a separate adapted copy of the public ImageFlowNet repository and is not bundled here.
+1** (the paper configuration). The protocol is in [`BASELINES.md`](BASELINES.md); the code is in
+[`../baselines/imageflownet/`](../baselines/imageflownet/), under a non-commercial license.
 
 ## 4. Diagnostics and figures
 
 ```bash
 # Is the temporal pathway responsive (not collapsed)?
-python temporal_sensitivity.py --checkpoint runs/<run>/checkpoint_best.pth --split test
+python temporal_sensitivity.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth --split test
 
 # Multi-eye predicted-trajectory figure (faithful across progression rates)
-python plot_trajectories.py --csv runs/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
+python plot_trajectories.py --csv runs/faf_ga/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
 ```
 
 See [`PIPELINE.md`](PIPELINE.md) for the full train → eval → diagnose workflow and what to monitor.

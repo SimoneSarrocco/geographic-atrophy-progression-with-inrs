@@ -10,4 +10,3 @@ at test time (only the per-eye latent is adapted).
 | `omega_scheduler.py` | `get_omega_schedule` — per-layer SIREN activation frequency (ω) schedule: `constant`, `linear`, or `exponential`. **ω is the SIREN frequency hyperparameter**, unrelated to any dataset name. |
 | `encodings.py` | Coordinate / condition / time encoders: hash-grid, Fourier, Gaussian, identity, and MLP condition encodings, with `get_encoding` / `get_condition_encoding` factories. |
 | `layers.py` | Auxiliary modulated-SIREN layer. |
-| `WIRE.py` | Alternative wavelet (Gabor) INR activation, for experimentation. |

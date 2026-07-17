@@ -64,7 +64,8 @@ python eval_faf_ga.py --model T_UNet          --target-dim '(256,256)' --segment
 python eval_faf_ga.py --model I2SBUNet        --target-dim '(256,256)' --diffusion-interval 100 --segmentor-ckpt "$SEG"
 ```
 
-Each evaluation writes `leave_one_out_summary_test.csv` into the run directory, in the same format as
+Each evaluation writes `leave_one_out_summary_test_<best_type>.csv` into the run directory
+(`..._seg_dice.csv` with the default `--best-type`), in the same format as
 GAP-INR's [`summarize_eval.py`](../../summarize_eval.py), so the comparison table reads identical
 fields across every method: DICE, PSNR, SSIM, Hausdorff distance and lesion-area MAE, split into
 interpolation and extrapolation. A copy-forward reference (predict the source visit unchanged) is

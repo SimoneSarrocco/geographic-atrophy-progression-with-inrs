@@ -23,8 +23,11 @@ ImageFlowNet paper itself.
 
 ## What makes the comparison fair
 
-Every method trains and evaluates on the **same eyes**, the **same visits** and the **same 512 grid**,
-enforced in code rather than by convention:
+Every method trains and evaluates on the **same eyes**, the **same visits** and is scored on the
+**same 512 grid**, enforced in code rather than by convention. Note that the scoring grid and a
+method's working resolution are different things: the ImageFlowNet models run at `--target-dim
+(256,256)`, and their predictions and the ground truth are both resized to the 512 scoring grid
+(`METRIC_DIM`) before any metric is computed, exactly as for GAP-INR.
 
 - **Split.** Both the baselines and GAP-INR read the `split` column of the same clinical CSV
   (see [`DATA.md`](DATA.md)). GAP-INR checks the resolved eyes against
@@ -77,7 +80,8 @@ python eval_faf_ga.py --model I2SBUNet        --target-dim '(256,256)' --diffusi
   history via test-time adaptation. T-I2SBUNet has no test-time-adaptation mechanism, so **Scenario 2
   is not applicable to it**.
 
-Each run writes a `leave_one_out_summary_test.csv` in the same format as GAP-INR's
+Each run writes a `leave_one_out_summary_test_<best_type>.csv` (`leave_one_out_summary_test_seg_dice.csv`
+with the default `--best-type seg_dice`) in the same format as GAP-INR's
 [`summarize_eval.py`](../summarize_eval.py), so the final comparison table reads identical fields
 (DICE / PSNR / SSIM / Hausdorff distance / lesion-area MAE, interpolation vs extrapolation) across
 every method. A copy-forward reference (predict the source visit unchanged) is scored alongside as

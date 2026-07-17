@@ -1,24 +1,28 @@
-# Core PyTorch Stack (install torch first if system-specific CUDA version is needed)
+# Python 3.10.
+# For a CUDA build other than the PyPI default, install torch first from the index that matches
+# your driver, e.g.:  pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# Core PyTorch Stack
 torch>=2.0
 torchvision
-torchaudio
 
 # Scientific Computing & Data Processing
 numpy>=1.22
 scipy>=1.10
 pandas>=1.5
 scikit-image>=0.20
+Pillow>=9.0
 
 # Experiment Tracking and Logging
 wandb>=0.15
 tensorboard>=2.12
 
+# Metrics
+lpips>=0.1.4          # perceptual distance; downloads AlexNet weights on first use
+
 # Visualization, Config and Utilities
 matplotlib>=3.5
-plotly>=5.13
 tqdm>=4.65
 PyYAML>=6.0
-boto3>=1.26
-einops>=0.6
+boto3>=1.26           # lakeFS download only (data_loading/lakefsloader.py)
 opencv-python>=4.7
-ipykernel

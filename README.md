@@ -53,7 +53,9 @@ the command line (`--inr_decoder__hidden_size 512`).
 - Separate heads (default, `shared_output_layer: false`). Two output layers: the reconstruction head
   reads the last SIREN layer and predicts FAF intensity; the segmentation head reads the penultimate
   layer and predicts the GA logits. Reading the segmentation logits one layer earlier uses slightly
-  lower-frequency features, which segment better, and decouples the two tasks.
+  lower-frequency features, which segment better, and decouples the two tasks. The shipped config
+  sets `seg_head_use_last_features: true`, so the paper's segmentation head sees the penultimate
+  *and* last-layer features; set it to `false` for the penultimate layer alone.
 - Shared output head (`shared_output_layer: true`). A single output layer maps to `[recon | seg]`
   together, as in the upstream framework. It is more parameter-efficient but couples the two
   tasks; when it is on, the `seg_head_*` and `seg_branch` options are ignored. Channel order is
@@ -211,12 +213,18 @@ are written every `validate_every` epochs, and the best one is selected on held-
 ### 2. Validation, which is the test-time procedure
 
 Validation runs the same procedure used at deployment: the trained decoder is frozen, a fresh latent
-is optimized on each val eye's optimization visits (reconstruction only, `epochs.val` steps), and the
-model is evaluated on the held-out visit. The segmentation for that visit is produced without a mask.
+is optimized on each val eye's optimization visits for `epochs.val` steps, and the model is evaluated
+on the held-out visit. The held-out visit is never part of that fit — neither its image nor its mask —
+so its segmentation is produced without ever seeing a mask for it.
+
+The latent is fit with the same reconstruction + segmentation loss used in training, on the
+*acquired* visits only (`optimizer.seg_loss_val: true`, the shipped default). Setting
+`seg_loss_val: false` fits the latent on the reconstruction loss alone and leaves segmentation as a
+pure held-out signal; that is the stricter ablation, not the default.
 This is what selects the best checkpoint. It runs during training, and can also run standalone:
 
 ```bash
-python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
+python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
     --holdout_strategy leave_one_out --test off        # val only (model selection)
 ```
 
@@ -225,7 +233,7 @@ python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
 Run the selected model once on the test split (comparing configs on the test set would leak):
 
 ```bash
-python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth \
+python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
     --holdout_strategy leave_one_out --test on
 ```
 
@@ -241,7 +249,7 @@ lesion-area MAE, grouped into interpolation and extrapolation. That is the table
   baseline visit):
 
 ```bash
-python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth --support_k 1 --skip_val
+python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth --support_k 1 --skip_val
 ```
 
 `--epochs_val N` sets the TTA budget (number of latent-fit steps).
@@ -249,8 +257,8 @@ python evaluate.py --checkpoint runs/<run>/checkpoint_best.pth --support_k 1 --s
 ### 5. Diagnose and visualize
 
 ```bash
-python temporal_sensitivity.py --checkpoint runs/<run>/checkpoint_best.pth --split test   # RESPONSIVE / COLLAPSED
-python plot_trajectories.py --csv runs/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
+python temporal_sensitivity.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth --split test   # RESPONSIVE / COLLAPSED
+python plot_trajectories.py --csv runs/faf_ga/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
 ```
 
 `./run_pipeline.sh` runs the whole sequence and picks a free GPU. [`docs/PIPELINE.md`](docs/PIPELINE.md)
@@ -267,7 +275,7 @@ Each run creates `runs/<config>_<timestamp>_<jobid>/` with:
   `checkpoint_epoch_*.pth`. A checkpoint stores the decoder weights, the latents, the config, and the
   dataframe.
 - `tb_logs/` for TensorBoard (loss terms, held-out DICE/PSNR/SSIM, time-sensitivity, reconstruction
-  figures); view with `tensorboard --logdir runs/<run>/tb_logs`.
+  figures); view with `tensorboard --logdir runs/faf_ga/<run>/tb_logs`.
 - per-split metric JSONs and CSVs, reconstruction and publication figures, and `lesion_analysis/`.
 - `evaluate.py` adds `evaluation_*/` with `leave_one_out_summary.csv`.
 

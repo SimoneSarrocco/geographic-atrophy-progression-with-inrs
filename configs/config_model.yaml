@@ -5,8 +5,9 @@
 #
 #   python run.py --config_model configs/config_model.yaml
 #
-# Any key can be overridden from the command line with --key__subkey value, e.g.
-#   python run.py --inr_decoder__hidden_size 512 --epochs__train 200
+# Selected keys can be overridden from the command line with --key__subkey value, e.g.
+#   python run.py --inr_decoder__hidden_size 512
+# `python run.py --help` lists them; every other key is set here, in the file.
 
 root_dir: ''            # empty = current working directory
 

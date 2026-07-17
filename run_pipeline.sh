@@ -8,7 +8,7 @@
 #   ./run_pipeline.sh                         # full pipeline, auto GPU, default config
 #   ./run_pipeline.sh --gpu 3                 # force a specific GPU
 #   ./run_pipeline.sh --config_model configs/config_model.yaml
-#   ./run_pipeline.sh --skip-train --run tmp/omega_20260624_204828_loc   # eval+diag only
+#   ./run_pipeline.sh --skip-train --run runs/faf_ga/faf_ga_20260624_204828_loc   # eval+diag only
 #   ./run_pipeline.sh --stages train,eval     # subset of stages (train,eval,tsens,traj)
 #
 # Stages:

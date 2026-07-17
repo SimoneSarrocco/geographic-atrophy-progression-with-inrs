@@ -3,7 +3,7 @@
 This repository adapts the open-source CINeMA framework (Conditional Implicit Neural Multi-Modal
 Atlas), originally developed for spatio-temporal atlases of the perinatal brain. The SIREN-based
 conditional INR decoder, the FiLM latent/condition modulation, the auto-decoder training scheme, and
-the YAML configuration system come from that project and are reused here under its license.
+the YAML configuration system come from that project and are reused here under its Apache-2.0 license.
 
 The contribution of the accompanying paper is the adaptation of the framework to longitudinal
 geographic-atrophy forecasting from fundus autofluorescence imaging: the 2-D retinal data pipeline
@@ -17,6 +17,7 @@ the comparison protocol.
 CINeMA: Conditional Implicit Neural Multi-Modal Atlas for a Spatio-Temporal Representation of the
 Perinatal Brain — Dannecker, Sideri-Lampretsa, Starck, Mihailov, Milh, Girard, Auzias, Rueckert.
 *IEEE Transactions on Medical Imaging*, 2025. doi:10.1109/TMI.2025.3605194.
+Source: https://github.com/m-dannecker/CINeMA (Apache-2.0).
 
 ```bibtex
 @article{dannecker2025cinema,
@@ -31,6 +32,10 @@ Perinatal Brain — Dannecker, Sideri-Lampretsa, Starck, Mihailov, Milh, Girard,
 ## Third-party components
 
 - **SIREN** — sinusoidal representation networks (Sitzmann et al., 2020).
-- **Comparison baselines** — the ImageFlowNet family; see [`docs/BASELINES.md`](docs/BASELINES.md).
-  Baseline code is a separate, lightly adapted copy of the public ImageFlowNet repository and is not
-  included here.
+- **tiny-cuda-nn** — the spatial hash in `models/encodings.py` follows the reference implementation
+  (NVIDIA, BSD-3-Clause); see the citation in that file.
+- **Comparison baselines** — the ImageFlowNet family, in [`baselines/imageflownet/`](baselines/imageflownet/);
+  see [`docs/BASELINES.md`](docs/BASELINES.md). That directory is a lightly adapted copy of the public
+  ImageFlowNet repository and is **not** covered by this repository's Apache-2.0 license: it is
+  governed by the Yale Non-Commercial license, and the I2SB code it vendors by NVIDIA's own
+  non-commercial license. See [`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md).

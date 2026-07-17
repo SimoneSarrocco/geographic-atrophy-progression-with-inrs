@@ -74,8 +74,10 @@ def probe_eye(builder, split, sub_id, grid_coords, grid_shape, weeks):
     if sub_df.empty:
         return None
     actual_rows = [r.to_dict() for _, r in sub_df.iterrows()]
-    area_per_px = (float(actual_rows[0].get("ScaleXSlo", 1.0))
-                   * float(actual_rows[0].get("ScaleYSlo", 1.0)))
+    # Single source of truth for mm^2/px (build_model._lesion_px_area_mm2): native pitch scaled by
+    # the crop->grid resize factor. Computing ScaleXSlo*ScaleYSlo directly here would under-report
+    # areas by that factor and skew --area_eps_mm2 toward a STATIC verdict.
+    area_per_px = builder._lesion_px_area_mm2(actual_rows[0])
     extrap = True  # the whole point is to probe beyond the observed range
     t_used, areas, masks, faf_stack = [], [], [], []
     for w in weeks:

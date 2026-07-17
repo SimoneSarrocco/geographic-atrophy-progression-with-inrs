@@ -77,7 +77,7 @@ def main():
     col_titles = ["GT FAF", "GT FAF + GT seg", "Pred FAF", "Pred FAF + Pred seg", "Pred FAF + both"]
     for ri, (sub_id, eye, sdf) in enumerate(rows):
         row = (sdf.iloc[-1] if args_cmd.visit == "last" else sdf.iloc[0]).to_dict()
-        per_px_mm2 = float(row.get("ScaleXSlo", 1.0)) * float(row.get("ScaleYSlo", 1.0))
+        per_px_mm2 = b._lesion_px_area_mm2(row)   # single source of truth (includes the resize factor)
         vol = b._reconstruct_visit(row, int(sub_id), gc, gs, split=split, allow_extrapolation=False)
         pred = typecheck_img(vol)
         pred_faf = np.clip(pred[..., 0], 0, 1)

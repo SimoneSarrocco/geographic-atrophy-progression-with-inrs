@@ -1752,10 +1752,10 @@ class ModelBuilder:
             sub_writer = SummaryWriter(log_dir=sub_log_dir)
 
         # ---- Early stopping on the optimisation-visit DICE ----
-        # The latents are optimised with the reconstruction loss only (seg_loss_val: false),
-        # so the segmentation DICE on the optimisation visits peaks and then degrades as the
-        # latents overfit the image intensities. We monitor that DICE every inner epoch and keep
-        # the latents from the best inner epoch, restoring them before the final evaluation.
+        # The segmentation DICE on the optimisation visits peaks and then degrades as the latents
+        # overfit the image intensities -- most sharply under seg_loss_val: false, where the seg
+        # head gets no gradient here at all. We monitor that DICE every inner epoch and keep the
+        # latents from the best inner epoch, restoring them before the final evaluation.
         es_cfg = self.args['optimizer'].get('val_early_stopping', {}) or {}
         es_active = es_cfg.get('activate', False)
         es_patience = es_cfg.get('patience', 50)

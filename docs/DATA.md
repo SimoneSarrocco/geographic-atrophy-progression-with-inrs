@@ -204,20 +204,26 @@ Performed in `data_loading/dataset.py`:
 6. **Conditioning:** `weeks_from_baseline` (and enabled covariates) attached per visit, normalised to
    `[-1, 1]` via the `constraints` ranges.
 
-Lesion area (metrics/figures) is `#GA pixels × ScaleXSlo × ScaleYSlo` mm², identical for prediction and
-the identically-cropped ground truth.
+Lesion area (metrics/figures) is `#GA pixels × ScaleXSlo × ScaleYSlo × rf` mm², identical for
+prediction and the identically-cropped ground truth. `ScaleXSlo`/`ScaleYSlo` are mm per pixel at
+*native* resolution, so `rf = (crop_before_resize / world_bbox)²` converts them to the scoring grid:
+resizing the 620 crop to 512 makes each grid pixel cover `(620/512)² ≈ 1.47` native pixels of area.
+`rf = 1` for sections that crop at native pitch instead of resizing. `build_model.py`'s
+`_lesion_px_area_mm2` is the single source of truth, and the ImageFlowNet baselines apply the same
+factor, so areas are comparable across methods.
 
 ---
 
 ## 9. Building the CSV from scratch (optional helpers)
 
-The `preprocessing/` scripts document how the paper's CSV was assembled — adapt column names/paths:
+The `preprocessing/` scripts document how the paper's CSV was assembled from a raw export. They are
+reference material to adapt, not a chain to run in order, and they overwrite
+`data/clinical_metadata.csv` — including its `split` column. Read
+[`../preprocessing/README.md`](../preprocessing/README.md) before running any of them.
 
-```bash
-python preprocessing/enrich_clinical_data.py   # merge per-scan physical-scale metadata into the CSV
-python preprocessing/physical_enrichment.py    # add ScaleXSlo/ScaleYSlo (mm/pixel) columns
-python preprocessing/add_split_column.py        # add the patient-wise train/val/test 'split' column
-```
+- `enrich_clinical_data.py` — merge per-scan physical-scale metadata into the raw CSV
+- `physical_enrichment.py` — add `ScaleXSlo`/`ScaleYSlo` (mm/pixel) columns to the raw CSV
+- `add_split_column.py` — draw the patient-wise train/val/test `split` column
 
 ---
 
