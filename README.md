@@ -313,9 +313,9 @@ See [`configs/README.md`](configs/README.md).
 
 ## Attribution, license, citation
 
-This work builds on the CINeMA framework by Dannecker et al., 2026 (https://ieeexplore.ieee.org/document/11150663); see
+This work builds on the **CINeMA** framework **by Dannecker et al., 2026** (https://ieeexplore.ieee.org/document/11150663); see
 [`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
-**except** `baselines/imageflownet/`, which is a derivative of ImageFlowNet (https://ieeexplore.ieee.org/document/10890535) and carries the Yale
+**except** `baselines/imageflownet/`, which is a derivative of **ImageFlowNet** **by Liu at al., 2025**, (https://ieeexplore.ieee.org/document/10890535) and carries the Yale
 Non-Commercial licence shipped with it
 ([`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md)); that code is for
 non-commercial research or evaluation only. 
