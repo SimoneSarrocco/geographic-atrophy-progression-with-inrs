@@ -1,6 +1,6 @@
-# GAP-INR — Geographic-Atrophy Progression with Implicit Neural Representations
+# GAP-INR: Geographic-Atrophy Progression with Implicit Neural Representations
 
-GAP-INR forecasts the progression of geographic atrophy (GA) in age-related macular degeneration from
+GAP-INR forecasts the progression of geographic atrophy (GA) in Age-related Macular Degeneration (AMD) from
 longitudinal fundus autofluorescence (FAF) imaging, using a conditional implicit neural representation
 (INR). This repository covers data preparation, training, validation, testing, test-time adaptation,
 and the figures.
@@ -37,7 +37,7 @@ adaptation, TTA) on its available visits. Advancing the temporal condition then 
 visit, so the model can predict a GA mask for a visit whose image was never acquired. This is the
 forecasting task the paper evaluates.
 
-Compare models on the task metric — held-out GA DICE and lesion-area MAE — reported separately for
+Compare models on the task metric, held-out GA DICE and lesion-area MAE, reported separately for
 interpolation (a middle visit held out) and extrapolation (the last visit held out). The training
 loss is a poor guide, because the roughly 95% background dominates it.
 
@@ -147,7 +147,7 @@ conda activate gap-inr
 # or:  pip install -r requirements.txt
 ```
 
-The pipeline is 2-D only and has no volumetric-imaging dependencies.
+The pipeline is 2-D only.
 
 ---
 
@@ -180,7 +180,7 @@ Local (default): masks resolve under `cache_path/branch/data/…`. With the defa
 ```
 
 Use `mask_grader_mode: single` if you have one mask per visit (name it `…_mask01.png`); the paper uses
-`majority` (3-grader vote). Change `cache_path` to place everything under a different root.
+`majority` (majority vote among the three graders). Change `cache_path` to place everything under a different root.
 
 lakeFS (optional): copy `configs/lakefs_cfg.example.yaml` to `configs/lakefs_cfg.yaml`, fill in the
 endpoint and keys, and set `repo`/`branch`/`cache_path` in the `lakefs:` block. lakeFS object keys
@@ -199,7 +199,7 @@ full column reference.
 ### 1. Training (`run.py`)
 
 Trains the shared SIREN decoder and the per-eye latents on the train split, minimizing FAF
-reconstruction (MSE) plus GA segmentation (cross-entropy + Dice).
+reconstruction (MSE) plus GA segmentation (binary cross-entropy + Dice).
 
 ```bash
 python run.py                                  # uses configs/config_model.yaml
@@ -214,8 +214,7 @@ are written every `validate_every` epochs, and the best one is selected on held-
 
 Validation runs the same procedure used at deployment: the trained decoder is frozen, a fresh latent
 is optimized on each val eye's optimization visits for `epochs.val` steps, and the model is evaluated
-on the held-out visit. The held-out visit is never part of that fit — neither its image nor its mask —
-so its segmentation is produced without ever seeing a mask for it.
+on the held-out visit. The held-out visit is never part of that fit, neither its image nor its mask.
 
 The latent is fit with the same reconstruction + segmentation loss used in training, on the
 *acquired* visits only (`optimizer.seg_loss_val: true`, the shipped default). Setting
@@ -230,7 +229,7 @@ python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
 
 ### 3. Testing
 
-Run the selected model once on the test split (comparing configs on the test set would leak):
+Run the best-performing model once on the test split:
 
 ```bash
 python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
@@ -314,10 +313,9 @@ See [`configs/README.md`](configs/README.md).
 
 ## Attribution, license, citation
 
-This work builds on a prior open-source conditional-INR framework; see
+This work builds on the CINeMA framework by Dannecker et al., 2026 (https://ieeexplore.ieee.org/document/11150663); see
 [`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
-**except** `baselines/imageflownet/`, which is a derivative of ImageFlowNet and carries the Yale
+**except** `baselines/imageflownet/`, which is a derivative of ImageFlowNet (https://ieeexplore.ieee.org/document/10890535) and carries the Yale
 Non-Commercial licence shipped with it
 ([`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md)); that code is for
-non-commercial research or evaluation only. Citation details for the paper will be added on
-publication.
+non-commercial research or evaluation only. 
