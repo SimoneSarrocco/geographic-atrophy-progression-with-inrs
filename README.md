@@ -29,8 +29,8 @@ cohort and modulated two ways:
 - per visit, by a temporal conditioning variable (weeks from baseline), applied as FiLM modulation.
 
 From one query coordinate the decoder predicts the FAF intensity (reconstruction head) and the GA
-segmentation (segmentation head). The model is 2-D and resolution-agnostic — it maps coordinates to
-values — so a model trained at one resolution can be evaluated at another without retraining.
+segmentation (segmentation head). The model is 2D and resolution-agnostic (it maps coordinates to
+values) so a model trained at one resolution can be evaluated at another without retraining.
 
 At test time the decoder is frozen and only a new eye's latent code is optimized (test-time
 adaptation, TTA) on its available visits. Advancing the temporal condition then produces a future
@@ -125,7 +125,7 @@ components in the GA mask.
 | `models/` | SIREN trunk, INR decoder, condition/time encoders, ω scheduler. |
 | `data_loading/` | Dataset, coordinate sampling, preprocessing, optional remote (lakeFS) loader. |
 | `preprocessing/` | Scripts that build the clinical CSV and the train/val/test split. |
-| `baselines/imageflownet/` | The paper's comparison methods (ImageFlowNet family), on the same split and scoring grid. Separately licensed — see below. |
+| `baselines/imageflownet/` | The paper's comparison methods (ImageFlowNet family), on the same split and scoring grid. Separately licensed, see below. |
 | `docs/` | Documentation (see below). |
 | `utils.py` | Shared library (loss, grids, image IO, logging, figure helpers). |
 
