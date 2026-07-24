@@ -120,7 +120,7 @@ class Siren(nn.Module):
                                                         np.sqrt(6 / branch_omega) / branch_omega)
             else:
                 # Segmentation head. Input is the penultimate features (+ optionally the last-layer
-                # features) plus the latents. A single linear map is weak for a hard lesion task, so
+                # features) plus the latents. If a single linear map is weak,
                 # seg_head_num_layers > 0 builds a small ReLU MLP instead (more decoding capacity).
                 seg_in = hidden_size + lat_size + (hidden_size if self.seg_head_use_last_features else 0)
                 if seg_head_num_layers and seg_head_num_layers > 0:

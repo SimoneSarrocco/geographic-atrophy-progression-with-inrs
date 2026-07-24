@@ -192,10 +192,6 @@ class Data(Dataset):
         if self.args['dataset'].get('dataset_name') == 'faf_ga':
             self._apply_mask_grader_mode()
 
-        # Offline pseudo-eye augmentation (train only) BEFORE id mapping, so each augmented copy
-        # becomes its own patient-eye -> its own latent slot.
-        self._apply_pseudo_eye_augmentation()
-
         self._map_subject_ids()
         self._init_data_augmentation()
         self._compute_patient_stats()
@@ -779,26 +775,12 @@ class Data(Dataset):
             # If columns are missing (e.g. before enrichment), default to 1.0 (pixels)
             scale_x = float(row_dict.get('ScaleXSlo', 1.0))
             scale_y = float(row_dict.get('ScaleYSlo', 1.0))
-            
-            # A 3x3 affine for 2D images: [x_mm, y_mm, 1] = diag(scale_x, scale_y, 1) @ [x_px, y_px, 1]
-            # affine = np.array([
-            #    [scale_x, 0, 0],
-            #    [0, scale_y, 0],
-            #    [0, 0, 1]
-            # ])
+
             modalities[mod_key] = Simple2DImage(img_np)
         # check that all modalities have the same shape
         shapes = [modalities[mod_key].shape for mod_key in modalities]
         if len(set(shapes)) != 1:
             raise ValueError(f"Modalities have different shapes: {shapes}")
-        
-        # check that all modalities have approximately the same affine
-        # affines = [modalities[mod_key].affine for mod_key in modalities]
-        # for i, affine in enumerate(affines):
-        #     if i == 0 or np.allclose(affines[i], affines[i-1], atol=1e-6):
-        #         continue
-        #     else:
-        #         raise ValueError(f"Modalities have different affines: {affines}")
 
         # Ensure mask values are binary indices [0, 1] for FAF-GA masks (only if seg exists)
         has_seg = self.args['inr_decoder']['out_dim'][-1] > 0  # check if we have segmentation
@@ -808,34 +790,7 @@ class Data(Dataset):
             if mask_data.max() > len(self.args['dataset'].get('label_names', ['BG'])) - 1:
                 # print(f"Normalizing mask values from {np.unique(mask_data)} to binary [0, 1]")
                 mask_data = (mask_data > 0).astype(np.float32)
-                # Use Simple2DImage for 2D data instead of nib.Nifti1Image to avoid 4x4 affine requirement
-                # if modalities[mask_key].affine.shape == (3, 3):
-                #     modalities[mask_key] = Simple2DImage(mask_data, modalities[mask_key].affine)
-                # else:
-                #      modalities[mask_key] = nib.Nifti1Image(mask_data, modalities[mask_key].affine)
                 modalities[mask_key] = Simple2DImage(mask_data)
-
-            # if mask_reconstruction is enabled, mask the modalities and add background halo 
-            # to the segmentation. This helps to delineate the geographic atrophy from the (noisy) background.
-            if self.args['mask_reconstruction']:
-                mask = modalities[self.modality_keys[-1]].get_fdata()>0
-                for mod_key in self.modality_keys[:-1]:
-                    modalities[mod_key] = mask_nifti(modalities[mod_key], mask)
-                modalities[self.modality_keys[-1]] = add_background_halo(self.args['dataset']['label_names'],
-                                                                          modalities[self.modality_keys[-1]])
-
-        # Deterministic pseudo-eye transform (train only): same geometric warp on FAF + mask, plus
-        # intensity jitter on FAF. Identity for original eyes / non-train splits (spec is None).
-        spec = self._augment_spec_from_row(row_dict)
-        if spec is not None:
-            for mk in modalities:
-                is_seg = has_seg and (mk == self.modality_keys[-1])
-                arr = modalities[mk].get_fdata()
-                arr = self._apply_geometric(arr, spec, is_seg, soft=soft_mode)
-                if not is_seg:
-                    arr = self._apply_intensity(arr, spec)
-                modalities[mk] = Simple2DImage(arr.astype(np.float32))
-
         return modalities
 
     def load_coords_and_values(self, modalities, row_dict, normalize=True):
@@ -1133,7 +1088,7 @@ class Data(Dataset):
         conditions = []
         time_as_input = self.args['inr_decoder'].get('time_as_input', False)
         temporal_key = self._get_temporal_key()
-        has_weeks_map = (self.args['dataset'].get('visit_week_map') is not None)
+        # has_weeks_map = (self.args['dataset'].get('visit_week_map') is not None)
         
         for key in self.args['dataset']['conditions']:
             if self.args['dataset']['conditions'][key]: # if condition is enabled
@@ -1668,114 +1623,6 @@ class Data(Dataset):
         plt.savefig(out_path, dpi=100, bbox_inches='tight')
         plt.close()  # free memory
         print(f"{indent}Saved histogram to {out_path}")
-
-    # ------------------------------------------------------------------
-    # Pseudo-eye (offline) data augmentation
-    # ------------------------------------------------------------------
-    # Why pseudo-eyes? The latent is a SPATIAL grid shared across all visits of a patient-eye.
-    # A geometric augmentation changes the eye's spatial layout, so it cannot share a latent with
-    # the un-augmented eye (a fixed grid can't encode two orientations) and it must be applied
-    # IDENTICALLY to all of that eye's visits (otherwise the shared latent + longitudinal signal
-    # break). We therefore materialise each augmented variant as a NEW patient-eye (its own latent)
-    # with a DETERMINISTIC transform fixed across its visits. Train-only.
-
-    def _sample_aug_spec(self, rng, aug):
-        """Sample one deterministic transform spec for a pseudo-eye (used for all its visits)."""
-        flip = bool(aug.get('horizontal_flip', False)) and (rng.rand() < 0.5)
-        rot = float(rng.uniform(-1.0, 1.0) * aug.get('rotation_deg', 0.0))
-        tf = float(aug.get('translation_frac', 0.0))
-        g = float(aug.get('gamma', 0.0))
-        return {
-            'flip': flip,
-            'rot': rot,
-            'tx': float(rng.uniform(-1.0, 1.0) * tf),     # fraction of width (pixels resolved at apply)
-            'ty': float(rng.uniform(-1.0, 1.0) * tf),     # fraction of height
-            'scale': float(1.0 + rng.uniform(-1.0, 1.0) * aug.get('scale', 0.0)),
-            'gamma': float(1.0 + rng.uniform(-1.0, 1.0) * g) if g > 0 else 1.0,
-            'bright': float(rng.uniform(-1.0, 1.0) * aug.get('brightness', 0.0)),
-            'noise': float(aug.get('noise_std', 0.0)),
-            'seed': int(rng.randint(0, 2**31 - 1)),       # fixed noise pattern -> a stable pseudo-eye
-        }
-
-    def _apply_pseudo_eye_augmentation(self):
-        aug = self.args.get('data_augmentation', {})
-        if not aug.get('activate', False) or aug.get('mode', 'pseudo_eye') != 'pseudo_eye':
-            return
-        if self.split != 'train':
-            return
-        n = int(aug.get('n_augmentations', 0))
-        if n <= 0:
-            return
-        import hashlib
-        id_col = self.id_column
-        base = self.df.copy()
-        base['aug_id'] = 0
-        parts = [base]
-        seed0 = int(self.args.get('seed', 0))
-        for v in range(1, n + 1):
-            dfv = self.df.copy()
-            dfv['aug_id'] = v
-            for eye in list(dfv[id_col].unique()):
-                h = int(hashlib.md5(f"{eye}|{v}|{seed0}".encode()).hexdigest(), 16) % (2**31)
-                spec = self._sample_aug_spec(np.random.RandomState(h), aug)
-                m = (dfv[id_col] == eye)
-                for k, val in spec.items():
-                    dfv.loc[m, f'aug_{k}'] = val
-                dfv.loc[m, id_col] = f"{eye}__aug{v}"     # new pseudo-eye -> new latent slot
-            parts.append(dfv)
-        self.df = pd.concat(parts, ignore_index=True)
-        print(f"[{self.split}] pseudo-eye augmentation: +{n} variant(s) -> {len(self.df)} rows, "
-              f"{self.df[id_col].nunique()} pseudo-eyes (was {base[id_col].nunique()}).")
-
-    def _augment_spec_from_row(self, row_dict):
-        """Return the deterministic transform spec stored on this row, or None (originals/eval)."""
-        if not row_dict.get('aug_id', 0):
-            return None
-        def g(k, d):
-            val = row_dict.get(f'aug_{k}', d)
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                return d
-            return val
-        return {'flip': bool(g('flip', False)), 'rot': float(g('rot', 0.0)),
-                'tx': float(g('tx', 0.0)), 'ty': float(g('ty', 0.0)), 'scale': float(g('scale', 1.0)),
-                'gamma': float(g('gamma', 1.0)), 'bright': float(g('bright', 0.0)),
-                'noise': float(g('noise', 0.0)), 'seed': int(g('seed', 0))}
-
-    def _apply_geometric(self, data, spec, is_seg, soft=False):
-        """Flip + (rotation/scale/translation) warp. Same transform for FAF and mask. Nearest for
-        hard masks (preserve labels), linear for intensity and soft masks."""
-        import scipy.ndimage as ndi
-        out = np.asarray(data, dtype=np.float32)
-        if spec['flip']:
-            out = np.ascontiguousarray(out[:, ::-1])
-        rot, sc, tx, ty = spec['rot'], spec['scale'], spec['tx'], spec['ty']
-        if rot != 0.0 or sc != 1.0 or tx != 0.0 or ty != 0.0:
-            order = 1 if (not is_seg or soft) else 0
-            H, W = out.shape[:2]
-            theta = np.deg2rad(rot)
-            c, s = np.cos(theta), np.sin(theta)
-            M = np.array([[c, s], [-s, c]], dtype=np.float64) / max(sc, 1e-6)  # output->input (row,col)
-            center = np.array([(H - 1) / 2.0, (W - 1) / 2.0])
-            tpix = np.array([ty * H, tx * W])
-            offset = center - M @ center - tpix
-            out = ndi.affine_transform(out, M, offset=offset, order=order, mode='constant', cval=0.0)
-        return out
-
-    def _apply_intensity(self, data, spec):
-        """Gamma / brightness / additive noise, applied in [0,1] relative to the image max and
-        rescaled back so the raw intensity range (and hence patient_stats) stays consistent."""
-        out = np.asarray(data, dtype=np.float32)
-        mx = float(out.max())
-        if mx <= 0:
-            return out
-        d = np.clip(out / mx, 0.0, 1.0)
-        if spec['gamma'] != 1.0:
-            d = np.power(d, spec['gamma'])
-        if spec['bright'] != 0.0:
-            d = d + spec['bright']
-        if spec['noise'] > 0.0:
-            d = d + np.random.RandomState(spec['seed']).normal(0.0, spec['noise'], size=d.shape).astype(np.float32)
-        return (np.clip(d, 0.0, 1.0) * mx).astype(np.float32)
 
     def _init_data_augmentation(self):
         """

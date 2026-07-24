@@ -1,7 +1,7 @@
 # ImageFlowNet baselines
 
 The comparison methods reported in the paper, adapted from [ImageFlowNet](https://github.com/ChenLiu-1996/ImageFlowNet)
-to the same cohort, the same split and the same 512 scoring grid as GAP-INR. Provenance, the list of
+to the same cohort, the same split as GAP-INR. Provenance, the list of
 changes made for this paper, and the licensing of this directory are in [ATTRIBUTION.md](ATTRIBUTION.md).
 
 > **Licence.** This directory is **not** covered by the repository's Apache-2.0 licence. It is a
@@ -23,11 +23,9 @@ ImageFlowNet paper itself.
 ## Why the numbers are comparable to GAP-INR
 
 These models output **images only**, so GA segmentation comes from a single frozen segmentor trained
-once and reused for all three forecasters — differences between them reflect the forecaster, not the
-segmentor. Everything else is shared with GAP-INR by construction rather than by convention:
+once and reused for all three forecasters. Everything else is shared with GAP-INR by construction rather than by convention:
 
-- `eval_spec.py` pins the canonical eye lists and is imported by the evaluator, which hard-asserts
-  that the eyes it scores are exactly GAP-INR's test eyes. A split drift fails loudly instead of
+- `eval_spec.py` makes sure that we use exactly GAP-INR's patient-wise data split. A split drift fails instead of
   silently producing an incomparable table.
 - `common_preproc.py` is the same intensity normalisation GAP-INR uses.
 - The loader center-crops the native 768 to 620 (a direct 512 crop clips GA in ~5/133 visits) and
@@ -67,9 +65,9 @@ python eval_faf_ga.py --model I2SBUNet        --target-dim '(256,256)' --diffusi
 Each evaluation writes `leave_one_out_summary_test_<best_type>.csv` into the run directory
 (`..._seg_dice.csv` with the default `--best-type`), in the same format as
 GAP-INR's [`summarize_eval.py`](../../summarize_eval.py), so the comparison table reads identical
-fields across every method: DICE, PSNR, SSIM, Hausdorff distance and lesion-area MAE, split into
-interpolation and extrapolation. A copy-forward reference (predict the source visit unchanged) is
-scored alongside, as the floor any forecaster has to beat.
+fields across every method: DICE, PSNR, SSIM, LPIPS, Hausdorff distance and lesion-area MAE, split into
+interpolation and extrapolation. A copy-forward reference (predict the source or last available GT visit unchanged) is
+scored alongside, as the floor any model has to beat.
 
 ### Paper configuration
 
@@ -79,29 +77,27 @@ scored alongside, as the floor any forecaster has to beat.
 - **Scenario 1** is a single-pair forecast (older visit → newer visit); **scenario 2** uses the full
   patient history via test-time adaptation. T-I2SBUNet has no test-time-adaptation mechanism, so
   scenario 2 does not apply to it.
-- Evaluation buckets results two ways: by visit position (interpolation vs extrapolation, GAP-INR's
-  framing) and by GA-growth magnitude (minor vs major, ImageFlowNet's Table 1 framing).
 
 ## Classical floors
 
-`comparison/interpolation/` scores the non-learned references for the interpolation regime — linear
-and cubic-spline pixel interpolation, growth-rate and linear-regression area extrapolation, and
+`comparison/interpolation/` scores the references: linear
+and cubic-spline pixel interpolation, and
 copy-forward. `run_seg_interp.py` needs only numpy/scipy/PIL and the shared spec: no GPU, no
 segmentor, because it interpolates the GA masks directly.
 
 ## Layout
 
 ```
-eval_spec.py        canonical split contract, shared with GAP-INR (asserted at eval time)
+eval_spec.py        canonical data split, shared with GAP-INR 
 common_preproc.py   canonical intensity normalisation, shared with GAP-INR
 monitor_panel.py    shared TensorBoard validation panel
 src/
   train_segmentor.py    trains the shared frozen GA segmentor
-  train_2pt_all.py      trains a forecaster (--model selects which)
+  train_2pt_all.py      trains a model (--model selects which)
   eval_faf_ga.py        leave-one-visit-out evaluation against the real GA masks
   datasets/             the cohort loader
   nn/                   model implementations
   utils/, data_utils/   upstream helpers
-external_src/I2SB/  vendored I2SB + guided-diffusion (see ATTRIBUTION.md)
+external_src/I2SB/  I2SB + guided-diffusion (see ATTRIBUTION.md)
 comparison/         classical interpolation/extrapolation floors
 ```

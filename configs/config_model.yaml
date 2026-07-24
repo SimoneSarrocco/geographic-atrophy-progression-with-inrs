@@ -1,4 +1,4 @@
-# Model, optimizer and training configuration. These values reproduce the paper's main result.
+# Model, optimizer and training configuration.
 #
 # This file is paired with configs/config_data.yaml, which defines the dataset sections. The
 # `config_data` key below selects which of those sections is used.

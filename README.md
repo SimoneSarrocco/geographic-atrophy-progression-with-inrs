@@ -6,7 +6,7 @@ longitudinal fundus autofluorescence (FAF) imaging, using a conditional implicit
 and the figures.
 
 ## Contents
-
+- [Attribution, license, citation](#attribution-license-citation)
 - [How it works](#how-it-works)
 - [Model architecture options](#model-architecture-options)
 - [Repository layout](#repository-layout)
@@ -16,30 +16,35 @@ and the figures.
 - [Outputs, logging, and checkpoints](#outputs-logging-and-checkpoints)
 - [Reproducing the paper](#reproducing-the-paper)
 - [Configuration reference](#configuration-reference)
-- [Attribution, license, citation](#attribution-license-citation)
 
 ---
 
+## Attribution, license, citation
+
+This work builds on a prior open-source INR framework ([`CINeMA, Dannecker et al., 2026`](github.com/m-dannecker/CINeMA/tree/main)); see
+[`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
+**except** `baselines/imageflownet/`, which is a derivative of [`ImageFlowNet, Liu et al., 2025`](https://github.com/KrishnaswamyLab/ImageFlowNet/tree/main), and carries the Yale
+Non-Commercial licence shipped with it
+([`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md)); that code is for
+non-commercial research or evaluation only.
+
 ## How it works
 
+![GAP-INR training and test-time optimisation overview](/home/simone.sarrocco/PhD/models/GAP-INR/docs/Figure1.png)
+
 Each patient-eye is represented as a continuous field. One SIREN decoder is shared across the whole
-cohort and modulated two ways:
+dataset and modulated two ways:
 
 - per eye, by a latent code (one latent per eye, shared across that eye's visits);
-- per visit, by a temporal conditioning variable (weeks from baseline), applied as FiLM modulation.
+- per visit, by a temporal conditioning variable (weeks from baseline, and Age of the patient at that visit), applied as FiLM modulation.
 
 From one query coordinate the decoder predicts the FAF intensity (reconstruction head) and the GA
-segmentation (segmentation head). The model is 2-D and resolution-agnostic — it maps coordinates to
-values — so a model trained at one resolution can be evaluated at another without retraining.
+segmentation (segmentation head). The model is 2-D and resolution-agnostic.
 
 At test time the decoder is frozen and only a new eye's latent code is optimized (test-time
 adaptation, TTA) on its available visits. Advancing the temporal condition then produces a future
 visit, so the model can predict a GA mask for a visit whose image was never acquired. This is the
 forecasting task the paper evaluates.
-
-Compare models on the task metric — held-out GA DICE and lesion-area MAE — reported separately for
-interpolation (a middle visit held out) and extrapolation (the last visit held out). The training
-loss is a poor guide, because the roughly 95% background dominates it.
 
 ---
 
@@ -58,8 +63,7 @@ the command line (`--inr_decoder__hidden_size 512`).
   *and* last-layer features; set it to `false` for the penultimate layer alone.
 - Shared output head (`shared_output_layer: true`). A single output layer maps to `[recon | seg]`
   together, as in the upstream framework. It is more parameter-efficient but couples the two
-  tasks; when it is on, the `seg_head_*` and `seg_branch` options are ignored. Channel order is
-  unchanged, so metrics and plots still work.
+  tasks; when it is on, the `seg_head_*` and `seg_branch` options are ignored. 
 
 ### Segmentation-head capacity
 - `seg_head_num_layers: 0` gives a single linear segmentation head (default); a value above 0 gives a
@@ -82,13 +86,13 @@ the command line (`--inr_decoder__hidden_size 512`).
 - `modulated_layers` sets which SIREN layers receive FiLM modulation (default: all).
 
 ### Latent representation
-- `latent_dim: [C, H, W]` is a per-eye latent grid (channels by spatial size); more spatial resolution
+- `latent_dim: [C, H, W]` is a per-eye latent grid (channels by spatial dimension); more spatial resolution
   carries more per-eye detail. A grid that is too coarse cannot hand the shared decoder enough
   per-eye detail and the reconstruction blurs.
 - Per-eye vs per-visit latents. By default one latent is shared across an eye's visits and time enters
   through conditioning. `independent_visits: true` (in `config_data.yaml`) gives one latent per visit
-  instead.
-- `cnn_kernel_size` adds a CNN modulator that spatially mixes the latent grid (`0` is the identity).
+  instead (each visit is treated as an independent patient).
+- `cnn_kernel_size` adds a CNN modulator that spatially mixes the latent grid (`0` is the identity, so it means no CNN).
 
 ### SIREN frequency (ω)
 `omega_0` (first layer) with `omega_start`/`omega_end` and `schedule_type` (`constant`, `linear`, or
@@ -97,37 +101,37 @@ Low frequencies bias the decoder toward coarse shape with no vessels or texture.
 sweeps this hyperparameter.
 
 ### Training
-The decoder weights and the persistent per-eye latents are optimized together during training
+The decoder weights and the per-eye latents are optimized together during training
 (auto-decoder). At test time the decoder is frozen and only the latent is fit.
 
 ### Inference post-processing
-`renormalize_output` stretches the reconstructed intensity per image; `seg_threshold` sets the
-confidence cutoff on P(GA); `seg_postprocess` (`keep_largest`, `min_area_px`) cleans up connected
+`renormalize_output` optionally stretches the reconstructed intensity per image; `seg_threshold` optionally sets the
+confidence cutoff on P(GA) rather than the hard-coded 0.5; `seg_postprocess` (`keep_largest`, `min_area_px`) optionally cleans up connected
 components in the GA mask.
 
 ---
 
 ## Repository layout
 
-| Path | Role |
-|---|---|
-| `run.py` | Train entry point (assembles config, guards the split, launches the builder). |
-| `build_model.py` | Core engine (`ModelBuilder`): train / validate / test / test-time-adaptation loops, checkpointing, figures. |
-| `evaluate.py` | Standalone evaluation (val + test leave-one-out, TTA, clinical forecast) writing summary CSVs. |
-| `summarize_eval.py` | Interpolation-vs-extrapolation held-out summary table. |
-| `temporal_sensitivity.py` | Static-collapse diagnostic (does the time pathway do anything?). |
-| `inference.py` | Minimal checkpoint-to-prediction wrapper. |
-| `run_pipeline.sh` | One-command orchestrator (train, eval, diagnose, trajectory figure). |
-| `plot_trajectories.py`, `plot_lesion_size_trajectories.py`, `seg_growth.py`, `analyze_faf_seg.py`, `visualize_grader_variability.py` | Figures and analysis. |
-| `grid_search_omega.py`, `run_grid_entry.py` | SIREN-frequency (ω₀) hyperparameter search. |
-| `verify_run_config.py` | Recover the config that a checkpoint was trained with. |
-| `configs/` | Model config (`config_model.yaml`), dataset config (`config_data.yaml`), split guard, lakeFS template. |
-| `models/` | SIREN trunk, INR decoder, condition/time encoders, ω scheduler. |
-| `data_loading/` | Dataset, coordinate sampling, preprocessing, optional remote (lakeFS) loader. |
-| `preprocessing/` | Scripts that build the clinical CSV and the train/val/test split. |
-| `baselines/imageflownet/` | The paper's comparison methods (ImageFlowNet family), on the same split and scoring grid. Separately licensed — see below. |
-| `docs/` | Documentation (see below). |
-| `utils.py` | Shared library (loss, grids, image IO, logging, figure helpers). |
+| Path | Role                                                                                                                      |
+|---|---------------------------------------------------------------------------------------------------------------------------|
+| `run.py` | Train entry point (assembles config, guards the split, launches the builder).                                             |
+| `build_model.py` | Core engine (`ModelBuilder`): train / validate / test / test-time-adaptation loops, checkpointing, figures.               |
+| `evaluate.py` | Standalone evaluation (val + test leave-one-out, TTA, clinical forecast) writing summary CSVs.                            |
+| `summarize_eval.py` | Interpolation-vs-extrapolation held-out summary table.                                                                    |
+| `temporal_sensitivity.py` | Static-collapse diagnostic (does the time conditioning do anything?).                                                     |
+| `inference.py` | Minimal checkpoint-to-prediction wrapper.                                                                                 |
+| `run_pipeline.sh` | One-command orchestrator (train, eval, diagnose, trajectory figure).                                                      |
+| `plot_trajectories.py`, `plot_lesion_size_trajectories.py`, `seg_growth.py`, `analyze_faf_seg.py`, `visualize_grader_variability.py` | Figures and analysis.                                                                                                     |
+| `grid_search_omega.py`, `run_grid_entry.py` | SIREN-frequency (ω₀) hyperparameter search.                                                                               |
+| `verify_run_config.py` | Recover the config that a checkpoint was trained with.                                                                    |
+| `configs/` | Model config (`config_model.yaml`), dataset config (`config_data.yaml`), split guard, lakeFS template.                    |
+| `models/` | SIREN trunk, INR decoder, condition/time encoders, ω scheduler.                                                           |
+| `data_loading/` | Dataset, coordinate sampling, preprocessing, optional remote (lakeFS) loader.                                             |
+| `preprocessing/` | Scripts that build the clinical CSV and the train/val/test split.                                                         |
+| `baselines/imageflownet/` | The paper's comparison methods (ImageFlowNet family), on the same split and scoring grid. Separately licensed, see below. |
+| `docs/` | Documentation (see below).                                                                                                |
+| `utils.py` | Shared library (loss, grids, image IO, logging, figure helpers).                                                          |
 
 Documentation:
 [`docs/DATA.md`](docs/DATA.md) (data preparation) ·
@@ -147,7 +151,7 @@ conda activate gap-inr
 # or:  pip install -r requirements.txt
 ```
 
-The pipeline is 2-D only and has no volumetric-imaging dependencies.
+The pipeline is 2-D only.
 
 ---
 
@@ -156,7 +160,7 @@ The pipeline is 2-D only and has no volumetric-imaging dependencies.
 See [`docs/DATA.md`](docs/DATA.md) for the full reference. In short:
 
 **1. Metadata CSV.** One row per patient-eye visit (`configs/config_data.yaml → tsv_file`, default
-`./data/clinical_metadata.csv`). Key columns: `Eye_ID` (identity, maps to one latent), `split`
+`./data/clinical_metadata.csv`). Key columns (adjust depending on your data): `Eye_ID` (identity, maps to one latent), `split`
 (train/val/test), `Patient_ID`, `Eye` (OD/OS), `Visit_ID`, `faf_path`, `ga_mask_path`, a time source
 (`visit_date` or `diff` or `Visit_Number`), and optionally `AgeatVisit` and `ScaleXSlo`/`ScaleYSlo`
 (mm/pixel, for area in mm²).
@@ -180,7 +184,7 @@ Local (default): masks resolve under `cache_path/branch/data/…`. With the defa
 ```
 
 Use `mask_grader_mode: single` if you have one mask per visit (name it `…_mask01.png`); the paper uses
-`majority` (3-grader vote). Change `cache_path` to place everything under a different root.
+`majority` (majority vote among the three graders). Change `cache_path` to place everything under a different root.
 
 lakeFS (optional): copy `configs/lakefs_cfg.example.yaml` to `configs/lakefs_cfg.yaml`, fill in the
 endpoint and keys, and set `repo`/`branch`/`cache_path` in the `lakefs:` block. lakeFS object keys
@@ -199,12 +203,12 @@ full column reference.
 ### 1. Training (`run.py`)
 
 Trains the shared SIREN decoder and the per-eye latents on the train split, minimizing FAF
-reconstruction (MSE) plus GA segmentation (cross-entropy + Dice).
+reconstruction (MSE) plus GA segmentation (binary cross-entropy + Dice).
 
 ```bash
 python run.py                                  # uses configs/config_model.yaml
 python run.py --config_model path/to/your_config.yaml    # a different config
-python run.py --inr_decoder__latent_dim "[64, 32, 32]"   # override a single knob
+python run.py --inr_decoder__latent_dim "[256, 32, 32]"   # override a single knob
 ```
 
 `validate_splits()` runs first and aborts on any train/val/test overlap or split mismatch. Checkpoints
@@ -212,13 +216,12 @@ are written every `validate_every` epochs, and the best one is selected on held-
 
 ### 2. Validation, which is the test-time procedure
 
-Validation runs the same procedure used at deployment: the trained decoder is frozen, a fresh latent
+Validation runs the following procedure: the trained decoder is frozen, a fresh latent
 is optimized on each val eye's optimization visits for `epochs.val` steps, and the model is evaluated
-on the held-out visit. The held-out visit is never part of that fit — neither its image nor its mask —
-so its segmentation is produced without ever seeing a mask for it.
+on the held-out visit. The held-out visit is never part of that fit, neither its image nor its mask.
 
-The latent is fit with the same reconstruction + segmentation loss used in training, on the
-*acquired* visits only (`optimizer.seg_loss_val: true`, the shipped default). Setting
+The latent is fit with the same reconstruction + segmentation loss used in training
+(`optimizer.seg_loss_val: true`, the shipped default). Setting
 `seg_loss_val: false` fits the latent on the reconstruction loss alone and leaves segmentation as a
 pure held-out signal; that is the stricter ablation, not the default.
 This is what selects the best checkpoint. It runs during training, and can also run standalone:
@@ -238,12 +241,12 @@ python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
 ```
 
 This runs full leave-one-out over every visit position and calls `summarize_eval.py`, writing
-`evaluation_*/leave_one_out_summary.csv` with held-out DICE, PSNR, SSIM, Hausdorff distance, and
-lesion-area MAE, grouped into interpolation and extrapolation. That is the table to report.
+`evaluation_*/leave_one_out_summary.csv` with held-out DICE, PSNR, SSIM, LPIPS, Hausdorff distance, and
+lesion-area MAE, grouped into interpolation and extrapolation.
 
 ### 4. Test-time adaptation and forecasting scenarios
 
-- Scenario 1 (single pair): forecast a target visit from one earlier visit.
+- Scenario 1 (single pair): predicts a target visit from one earlier visit.
 - Scenario 2 (full history): adapt the eye's latent on all past visits, then forecast. `--support_k K`
   fits on the first `K` visits and predicts the rest (`--support_k 1` forecasts everything from the
   baseline visit):
@@ -287,10 +290,9 @@ For Weights & Biases logging, set `logging: True` and a `wandb_entity` in `confi
 
 [`configs/config_model.yaml`](configs/config_model.yaml) ships the paper's configuration: SIREN hidden
 384 over 8 FiLM-modulated layers, latent `[256, 32, 32]`, ω = 30, `sr_weight` 10, `lr_inr` 1e-4,
-`lr_latent` 5e-3, on a 620-crop resized to a 512 grid (the `faf_ga_twovar_wktemporal_512` data
-section). Running `python run.py` with it unchanged reproduces the main result.
+`lr_latent` 5e-3, on a 620-crop resized to a 512 grid. Running `python run.py` with it unchanged reproduces the main result.
 [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) has the step-by-step instructions and the
-baseline protocol. The comparison methods are the ImageFlowNet family
+baseline protocol. The comparison methods are the ImageFlowNet model, as well as the comparing methods used in their paper (I2SBUNet and T-UNet)
 ([`docs/BASELINES.md`](docs/BASELINES.md)).
 
 ---
@@ -302,22 +304,6 @@ Two YAML files are merged at startup (`run.py`):
 - `configs/config_model.yaml`: model, optimizer, and training (decoder architecture, `latent_dim`,
   SIREN `omega_*`, loss weights, `epochs`, TTA budget, checkpoint selection). It carries a
   `config_data:` key naming the dataset section to use.
-- `configs/config_data.yaml`: dataset sections. A base `faf_ga` (a YAML anchor) and variants that
-  inherit it and change only resolution, conditioning, or sampling (`faf_ga_512`, `faf_ga_620`,
-  `faf_ga_twovar_wktemporal_512`).
-
-Select a data section on the command line (`--config_data faf_ga_620`) or through the `config_data:`
-field of the chosen `--config_model`. Any nested field can be overridden with `--section__key value`.
-See [`configs/README.md`](configs/README.md).
+- `configs/config_data.yaml`: dataset section.
 
 ---
-
-## Attribution, license, citation
-
-This work builds on a prior open-source conditional-INR framework; see
-[`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
-**except** `baselines/imageflownet/`, which is a derivative of ImageFlowNet and carries the Yale
-Non-Commercial licence shipped with it
-([`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md)); that code is for
-non-commercial research or evaluation only. Citation details for the paper will be added on
-publication.

@@ -59,11 +59,6 @@ class ModelBuilder:
 
     def __init__(self, args):
         self.args = args
-        # Global seed FIRST — before any model/latent init or dataloader creation — so SIREN weight
-        # init, the initial train latent bank, and the DataLoader shuffle order (which uses the global
-        # torch RNG) are all reproducible across runs with the same config. NOTE: this does not remove
-        # GPU float-accumulation nondeterminism (e.g. grid_sample backward); for that you'd also need
-        # torch.use_deterministic_algorithms / cudnn.deterministic (deliberately not enabled here).
         self._seed()
         self.device = args['device']
         self.loss_criterion = Criterion(args).to(args['device'])
@@ -109,9 +104,6 @@ class ModelBuilder:
             idx += 1
         raise ValueError("No temporal condition key found in dataset config. "
                          "Please specify 'temporal_condition' or enable at least one condition.")
-
-
-    # Add this to ModelBuilder in build_model.py
 
     def create_subset_dataloader(self, split, indices):
         """Creates a DataLoader for a subset of the dataset specified by indices."""
@@ -478,34 +470,6 @@ class ModelBuilder:
                 
         return np.mean(loss_hist_batches), epoch_avg_loss
 
-    def _monotonicity_penalty(self, coords, time_vals, conditions, idx_df, split, cfg):
-        """Soft non-decreasing-GA penalty. For each distinct visit (time) in this eye-batch, predict
-        the GA probability at a SHARED set of coordinates, order the visits chronologically, and
-        penalise any decrease in predicted GA prob from one visit to the next (mean of ReLU(p_t -
-        p_{t+1}) over coords & steps). 0 = perfectly non-decreasing. Returns None if <2 visits or no
-        seg head. Varies BOTH the time coordinate and the conditioning per visit, so it is correct
-        whether the temporal variable is a FiLM condition or a time-as-input coordinate."""
-        t = time_vals.reshape(time_vals.shape[0], -1)[:, 0]
-        uniq, inv = torch.unique(t, sorted=True, return_inverse=True)
-        V = int(uniq.numel())
-        if V < 2:
-            return None
-        out_dim = self.args['inr_decoder']['out_dim']
-        sr_dims, n_seg = sum(out_dim[:-1]), out_dim[-1]
-        if n_seg < 2:
-            return None
-        m = min(coords.shape[0], int(cfg.get('n_coords', 2048)))
-        c, idf = coords[:m], idx_df[:m]
-        probs = []
-        for k in range(V):
-            first = int((inv == k).float().argmax().item())
-            cond_k = conditions[first:first + 1].expand(m, -1)
-            time_k = time_vals[first:first + 1].expand(m, -1)
-            out = self.inr_decoder[split](c, self.latents[split], cond_k, idcs_df=idf, time_vals=time_k)
-            ga = torch.softmax(out[..., sr_dims:sr_dims + n_seg].float(), dim=-1)[..., -1]   # (m,)
-            probs.append(ga)
-        P = torch.stack(probs, dim=1)                 # (m, V), columns chronologically ordered
-        return torch.relu(P[:, :-1] - P[:, 1:]).mean()
 
     def train_batch(self, batch, epoch, split='train', epoch_train=None, sub_writer=None):
         tb_writer = self.args.get('tb_writer', None)
@@ -553,17 +517,6 @@ class ModelBuilder:
                                                    time_vals=time_vals)
                 loss = self.loss_criterion(values_p, values,
                                            seg_weight=seg_weight)
-
-                # Monotonicity penalty (GA is irreversible): the predicted GA probability at a fixed
-                # coordinate must be NON-DECREASING in time -- the soft analogue of Lachinov et al.'s
-                # phi_dot >= 0 ODE constraint. GT-free. Needs >= 2 visits in the batch, so it is a
-                # no-op unless dataset.batch_by_eye groups an eye's visits into one batch.
-                mono_cfg = self.args['optimizer'].get('mono_penalty', {}) or {}
-                if split == 'train' and mono_cfg.get('activate', False) and seg_weight > 0:
-                    mp = self._monotonicity_penalty(coords, time_vals, conditions, idx_df, split, mono_cfg)
-                    if mp is not None:
-                        loss['mono'] = mp
-                        loss['total'] = loss['total'] + float(mono_cfg.get('weight', 0.1)) * mp
 
             # Anchored latent regularisation during TTA (val/test). The latent is fit on the
             # reconstruction loss only, which is heavily under-determined; this L2 term keeps it
@@ -630,10 +583,8 @@ class ModelBuilder:
     def validate(self, epoch_train):
         """
         Validate the model on the validation set, including:
-        - optionally generate conditioned renders and save to disk
-        - generate training subjects (top 5) and compute eval metrics
-        - generate validation subjects (top 3) and compute eval metrics
-        - analyze latent space to predict attributes
+        - generate training subjects (first 3) and compute eval metrics
+        - generate validation subjects (whole validation set) and compute eval metrics
         - save model state
         """
         validation_cfg = self.args.get('validation', {})
@@ -654,12 +605,8 @@ class ModelBuilder:
         tb_writer = self.args.get('tb_writer', None)
         grid_coords, grid_shape = generate_world_grid(self.args, device=self.device)
 
-        if is_val_epoch and self.args['generate_cond_renders']:
-            self.generate_renders(epoch_train, n_max=100)
-
         if is_train_eval_epoch:
-            # Training evaluation: first 3 REAL patient-eyes only (never pseudo-eye augmentations,
-            # whose GT-vs-pred comparison is invalid; see _is_augmented_eye).
+            # Training evaluation: first 3 patient-eyes only just for visualisation purposes.
             train_df = self.datasets['train'].df
             picked_train_subs = self._real_eye_subs(train_df)[:3]
             # POSITIONAL indices (df.index.get_loc) so they match _evaluate_visits' iloc-based
@@ -669,6 +616,11 @@ class ModelBuilder:
 
             print(f"Evaluating reconstruction on {len(train_indices)} visits "
                   f"for {len(picked_train_subs)} training subjects...")
+
+            # for each visit of the 3 train patient-eyes, we reconstruct:
+            # current visit, baseline visit, metrics for FAF and GA segmentation, GA lesion area, image arrays (preds, refs, diff_intra, diff_long, gt_long_diff, gt_gt_diff)
+            # grouped per modality inside train_data['mods'], plus the flat per-visit reconstructions dict
+            # train_data is cached into _eval_sets['train']
             
             metrics_train, train_data = self._evaluate_visits(
                 train_indices, 'train', grid_coords, grid_shape, epoch=epoch_train, tb_writer=tb_writer
@@ -678,7 +630,29 @@ class ModelBuilder:
                         df=train_df, split='train',
                         tb_writer=tb_writer)
 
+            # build and save tiled reconstruction figures
+            # Figure 1: longitudinal reconstruction (only saved locally, no tensorboard) -->
+            # row1 is predicted image at every visit in chronological order, row2 is matching GT image
+            # Figure 2: longitudinal dynamics (only saved locally, no tensorboard) -->
+            # only if diff_long exists: row1 is intra-visit error map (pred vs GT at that visit),
+            # row2 is temporal diff (pred current vs pred baseline) to see whether the model is actually modelling change over time rather than repeating a static image
+            # Figure 3: GT baseline dynamics (saved locally and logged on tensorboard) -->
+            # only if both gt_long_diff and gt_gt_diff exist: row1 is predicted follow-up vs GT baseline,
+            # row2 is GT follow-up vs GT baseline, with per-column captions
+            # (DICE + predicted lesion area for row1, GT lesion area for row2, on the segmentation modality; PSNR/SSIM on the image modality).
+
             self._log_reconstruction_figures(train_data, 'train', epoch_train, tb_writer, tensorboard_tag='existing_visits')
+
+            # if we have one latent per patient-eye (default strategy)
+            # for each of the three picked eyes: load and center-crop every real GT visit, computes weeks-from-baseline --> chronological gt_visits
+            # if future=False --> interpolation: target prediction weeks are the midpoints between every pair of consecutive real GT visits
+            # if future=True --> extrapolation: target prediction weeks are the last GT visit's week plus configured offsets (default [26, 52, 78])
+            # _generate_novel_visits does the following:
+            # for each target week, builds an interpolated/extrapolated input row , computed (and caches) the synthesised image at that novel timepoint
+            # for each modality, merges the real GT visits and the synthetic predicted visits into one chronologically sorted list,
+            # center-crops everything to common dimensions, and, for segmentation modality,
+            # captions each column with the lesion area measured directly from that column's own mask (GT mask for GT columns, predicted mask for prediction columns)
+            # builds an interleaved figure alternating GT and predicted columns along the time axis and logs it to Tensorboard
 
             if not self.args['dataset'].get('independent_visits', False):
                  # In-between visits predictions on the picked training subjects (interpolation)
@@ -696,8 +670,9 @@ class ModelBuilder:
                     subject_data=train_data
                 )
 
+        # Validation branch
         if is_val_epoch:
-            # Validation
+            # Pick all validation eyes
             holdout_cfg = self.args.get('validation', {})
             strategy = holdout_cfg.get('holdout_strategy', 'last')
             val_df = self.datasets['val'].df
@@ -708,7 +683,7 @@ class ModelBuilder:
             if strategy == 'leave_one_out':
                 # Determine max number of visits across all val patient-eyes
                 max_visits = val_df.groupby('sub_id_int').size().max()
-                loo_eval_metrics = []  # flat list of per-visit held-out metric dicts across ALL positions
+                loo_eval_metrics = []  # accumulates every individual held-out visit's raw metric dict across all positions
                 for ho_pos in range(1, max_visits + 1):
                     print(f"\n{'='*60}")
                     print(f"  Leave-One-Out: holding out visit {ho_pos}/{max_visits}")
@@ -717,7 +692,7 @@ class ModelBuilder:
                     d = self._run_validation_round(
                         epoch_train, tb_writer, grid_coords, grid_shape,
                         picked_val_subs, holdout_position=ho_pos, tag_suffix=tag_suffix
-                    )
+                    )  # d is the round's mean held-out DICE
                     if d is not None:
                         val_eval_dices.append(d)
                     # Collect this position's per-visit held-out metrics for the averaged table.
@@ -732,13 +707,13 @@ class ModelBuilder:
                     log_metrics(self.args, loo_eval_metrics, epoch_train,
                                 split='val_eval_loo_avg', tb_writer=tb_writer)
             else:
-                if strategy == 'specific':
+                if strategy == 'specific':  # a specific visit is the held-out visit for evaluation
                     ho_pos = holdout_cfg.get('holdout_visit', None)
                     tag_suffix = f"holdout_V{ho_pos}" if ho_pos else "holdout_last"
-                elif strategy == 'none':
+                elif strategy == 'none':  # no visits for evaluation, all the available ones are used for optimisation
                     ho_pos = 'none'
                     tag_suffix = "holdout_none"
-                else:  # 'last'
+                else:  # 'last' --> the last visit is always the held-out visit for evaluation (default strategy to save time)
                     ho_pos = None
                     tag_suffix = "holdout_last"
 
@@ -770,7 +745,12 @@ class ModelBuilder:
         # Analyze lesion sizes progression for FAF-GA dataset after each training and validation round
         if is_val_epoch and self.args['dataset'].get('dataset_name') == 'faf_ga':
             self.analyze_and_plot_lesion_sizes(epoch_train)
-            # GA-growth overlay/onset figures (per-eye models only; cheap for the few val eyes).
+            # GA-growth overlay/onset figures (per-eye models only; cheap for the few val eyes)
+            # samples 10 weeks from 0 to last_observed_week + 48
+            # at each week, reconstructs the visit and extracts the thresholded GA mask (on the first pass also a background FAF for the overlay)
+            # passes the sequence of (week, mask) pairs, the FAF background, and the mm2-per-pixel scale factor (via _lesion_px_area_mm2) to an external helper (save_seg_growth_figure)
+            # which renders a boundary overlay (mask contour colored by week, visualising spatial GA growth direction, not just area) plus a per-pixel "onset" map (roughly: at which week did each pixel first become GA)
+            # it's purely a qualitative growth visualisation, only saved to disk
             self.plot_seg_growth_figures(epoch_train, 'val', picked_val_subs)
 
         if is_val_epoch:
@@ -1200,7 +1180,7 @@ class ModelBuilder:
 
     def log_publication_reconstruction_figure(self, epoch, split, subject_ids, opt_idcs, eval_idcs, subject_data=None, tag_suffix=''):
         """
-        Generates two publication-ready figures per patient-eye:
+        Generates two "publication-ready" figures per patient-eye:
         1. FAF combined timeline:
            - Row 1: FAF GT (blank for interpolated/extrapolated)
            - Row 2: FAF Prediction (with border style highlighting the status and PSNR)
@@ -1392,10 +1372,6 @@ class ModelBuilder:
                     'gt_area': gt_area,
                     'pred_area': pred_area
                 })
-                
-            # 2. Generate interpolated and extrapolated predictions (if sequential latents active)
-            interpolated_visits = []
-            extrapolated_visits = []
             
             # 2. Generate interpolated and extrapolated predictions (if not independent_visits)
             interpolated_visits = []
@@ -1708,7 +1684,7 @@ class ModelBuilder:
         # Re-initialize latents from scratch
         self._init_validation(split=split)
 
-        # ---- Frozen test-time latents (reproducibility) --------------------------------------------
+        # Frozen test-time latents (reproducibility)
         # The latent TTO uses grid_sample, whose backward has no deterministic CUDA kernel, so re-runs
         # drift slightly. To make the reported numbers a FIXED, citable artifact: run the TTO ONCE and
         # save the optimised per-round latents; on any later eval, RELOAD them and skip the TTO (pure
@@ -1751,7 +1727,7 @@ class ModelBuilder:
             sub_log_dir = os.path.join(self.args['output_dir'], 'tb_logs', f'{split}_inner_ep{epoch_train}')
             sub_writer = SummaryWriter(log_dir=sub_log_dir)
 
-        # ---- Early stopping on the optimisation-visit DICE ----
+        # Early stopping on the optimisation-visit DICE
         # The segmentation DICE on the optimisation visits peaks and then degrades as the latents
         # overfit the image intensities -- most sharply under seg_loss_val: false, where the seg
         # head gets no gradient here at all. We monitor that DICE every inner epoch and keep the
@@ -1796,7 +1772,7 @@ class ModelBuilder:
             tb_writer.add_scalar(f"{split}_inner_opt/{tag_suffix}/best_epoch", best_epoch, epoch_train)
             tb_writer.add_scalar(f"{split}_inner_opt/{tag_suffix}/best_dice", best_dice, epoch_train)
 
-        # ---- Frozen test-time latents: persist THIS round's optimised latents for reproducible re-eval.
+        # Frozen test-time latents: persist THIS round's optimised latents for reproducible re-eval.
         if _lat_mode == 'save' and not _loaded_frozen:
             self._frozen_latents[_lat_key] = self.latents[split].detach().cpu().clone()
             if _lat_path:
@@ -2014,26 +1990,6 @@ class ModelBuilder:
                         accum.setdefault(k, []).append(v.item() if hasattr(v, 'item') else v)
         return {k: float(np.mean(vals)) for k, vals in accum.items()} if accum else None
 
-    def _is_augmented_eye(self, row_or_id):
-        """True for pseudo-eye augmentation rows/ids (train-only).
-
-        These MUST be excluded from all evaluation, metrics, lesion analysis and figures: the
-        prediction comes from the pseudo-eye's latent and therefore lives in the augmented
-        (warped + intensity-jittered) frame, but the on-disk ground truth is the ORIGINAL,
-        un-augmented image/mask. Comparing the two is meaningless (it was producing DICE ~0.5
-        and garbage publication figures for `*__aug*` eyes). Pseudo-eyes exist only to regularise
-        the decoder during training; we never report their reconstruction quality.
-        """
-        id_col = self.args['dataset'].get('id_column', 'subject_id')
-        if isinstance(row_or_id, dict):
-            try:
-                if int(row_or_id.get('aug_id', 0) or 0) > 0:
-                    return True
-            except (TypeError, ValueError):
-                pass
-            return '__aug' in str(row_or_id.get(id_col, row_or_id.get('Eye_ID', '')))
-        return '__aug' in str(row_or_id)
-
     def _real_eye_subs(self, df):
         """Sorted unique sub_id_int of the NON-augmented (real) patient-eyes in `df`."""
         mask = pd.Series(True, index=df.index)
@@ -2047,31 +2003,27 @@ class ModelBuilder:
     def _evaluate_visits(self, visit_indices, split, grid_coords, grid_shape, epoch=0, tb_writer=None):
         """Reconstruct visits, compute metrics, collect images. Returns (metrics, subject_data)."""
         # self.inr_decoder[split].eval()
-        metrics = []
-        subject_data = {} # sub_id -> {eye_id: str, mods: {mod -> {visits: [], preds: [], refs: [], diff_intra: [], diff_long: []}}}
-        baseline_cache = {}
+        metrics = []  # will accumulate one metrics-dict per visit
+        subject_data = {}  # sub_id -> {eye_id: str, mods: {mod -> {visits: [], preds: [], refs: [], diff_intra: [], diff_long: []}}}; used to group all visits of the same eye together for tiled figure generation later
+        baseline_cache = {}  # memorises the baseline (first chronological visit) reconstruction per patient-eye --> computed once even though every follow-up visit of that eye need it for longitudinal comparison
 
         for visit_idx in tqdm(visit_indices, desc=f"Eval [{split}]", leave=False):
             # For each individual visit of the same patient-eye
             df_row_dict = self.datasets[split].df.iloc[visit_idx].to_dict()  # we take the corresponding row in the dataset
 
-            # Skip pseudo-eye augmentation rows: their GT on disk is un-augmented while the
-            # prediction is in the augmented frame, so any metric/figure would be wrong.
-            if self._is_augmented_eye(df_row_dict):
-                continue
             for mod in self.args['dataset']['modalities']:
                 df_row_dict[mod] = self.datasets[split].resolve_path(df_row_dict, mod)  # we save the paths of all image modalities for that visit
 
             sub_id_int = int(df_row_dict['sub_id_int'])  # patient-eye identifier (unique for each patient-eye)
             eye_id = str(df_row_dict.get(self.args['dataset'].get('id_column', 'subject_id'), 'unknown'))  # eye identifier (left or right)
 
-            # Reconstruct current follow-up visit
+            # Reconstruct current follow-up visit   --> we call the INR decoder to synthesise the predicted image for this specific visit
             latent_idx = visit_idx if self.args['dataset'].get('independent_visits', False) else sub_id_int
             volume_inf = self._reconstruct_visit(
                 df_row_dict, latent_idx, grid_coords, grid_shape, split=split
-            )
+            )  # predicted reconstruction of current visit
 
-            # Retrieve or compute baseline visit reconstruction
+            # Retrieve or compute baseline visit reconstruction --> we find the chronologically first visit for this patient-eye and run inference to get the predicted baseline visit (only once)
             if sub_id_int not in baseline_cache:
                 baseline_row = (
                     self.datasets[split].df[self.datasets[split].df['sub_id_int'] == sub_id_int]
@@ -2089,7 +2041,7 @@ class ModelBuilder:
                 baseline_inf = self._reconstruct_visit(
                     baseline_row_dict, baseline_latent_idx, grid_coords, grid_shape, split=split
                 )
-                baseline_cache[sub_id_int] = (baseline_inf, baseline_row)  # store reconstructed baseline and metadata row
+                baseline_cache[sub_id_int] = (baseline_inf, baseline_row)   # store reconstructed baseline and metadata row so that we compute it only once
             else:
                 # any subsequent visit of this patient-eye processed in the loop will hit the else block and immediately retrieve the baseline reconstruction without running inference again
                 baseline_inf, baseline_row = baseline_cache[sub_id_int]  
@@ -2107,13 +2059,13 @@ class ModelBuilder:
                 )
                 metrics.append(res_metrics)
                 
-                # Group for tiling
+                # Group for tiling --> initialise per-subject grouping structure
                 if sub_id_int not in subject_data:
                     subject_data[sub_id_int] = {'eye_id': eye_id, 'mods': {}, 'reconstructions': {}}
                 
                 visit_label = f"V{df_row_dict.get('Visit_Number', df_row_dict.get('Visit', '0'))}"
 
-                # --- Per-visit scalars computed ONCE and reused by every figure (single source of truth) ---
+                # Per-visit scalars computed ONCE and reused by every figure (single source of truth)
                 modalities = self.args['dataset']['modalities']
                 pred_seg = res_imgs[modalities[1]].get('pred') if len(modalities) > 1 else None
                 gt_seg = res_imgs[modalities[1]].get('ref') if len(modalities) > 1 else None
@@ -2122,11 +2074,10 @@ class ModelBuilder:
                 # ScaleXSlo/ScaleYSlo are mm/px at NATIVE resolution. faf_ga_620 samples the native-pitch
                 # 620 grid (sampling_bbox=[620,620], spacing 1.0) -> rf=1. faf_ga_512 center-crops 620
                 # (native pitch, no GA clip) then DOWNSAMPLES to 512, so each grid pixel covers
-                # (620/512)^2 more physical area -> rf=(crop/world)^2 restores the true mm^2. Every
-                # 512-scored baseline (NISF/MetaSeg/ImageFlowNet) applies the SAME factor -> comparable.
+                # (620/512)^2 more physical area -> rf=(crop/world)^2 restores the true mm^2.
                 px_area = self._lesion_px_area_mm2(df_row_dict)
-                pred_area = float(np.sum(pred_seg > 0.5) * px_area) if pred_seg is not None else None
-                gt_area = float(np.sum(gt_seg > 0.5) * px_area) if gt_seg is not None else None
+                pred_area = float(np.sum(pred_seg > 0.5) * px_area) if pred_seg is not None else None   # we extract the segmentation channel for lesion area computation
+                gt_area = float(np.sum(gt_seg > 0.5) * px_area) if gt_seg is not None else None   # we extract the segmentation channel for lesion area computation
 
                 # Carry the per-visit GA area on the metrics dict (single-element lists, matching the
                 # other metric values) so it is written into the per-hold-out-position JSON. This lets
@@ -2134,6 +2085,10 @@ class ModelBuilder:
                 # the pooled lesion CSV only survives the LAST leave-one-out round, so it cannot.
                 res_metrics['GT_Area_mm2'] = [gt_area if gt_area is not None else float('nan')]
                 res_metrics['Pred_Area_mm2'] = [pred_area if pred_area is not None else float('nan')]
+
+                # pulls the single float value out of each single-element metric list
+                # to be reused consistently across every downstream figure/annotation
+                # so different panels don't recompute/redisplay inconsistent numbers
 
                 def _first(lst):
                     return float(lst[0]) if isinstance(lst, (list, tuple)) and len(lst) > 0 else None
@@ -2143,8 +2098,7 @@ class ModelBuilder:
                 v_hd = _first(res_metrics.get('HD'))
                 v_lpips = _first(res_metrics.get('LPIPS'))
 
-                # Standardized cross-method monitor panel (identical layout/colormaps to gliomagrowth/
-                # IFN/NISF + the Phase-4 comparison figure), logged to TB per held-out eye.
+                # Standardized cross-method monitor panel logged to TB per held-out eye.
                 if tb_writer is not None and pred_seg is not None and len(modalities) > 0:
                     try:
                         import sys as _sys, os as _os
@@ -2162,6 +2116,10 @@ class ModelBuilder:
                                 psnr=v_psnr, ssim=v_ssim, dice=v_dice, mask_note="real GT")
                     except Exception as _e:
                         print(f"[monitor_panel] GAP-INR skip: {_e}")
+
+                # For each modality, appends this visit's predicted image, GT image, intra-visit diff map,
+                # and the scalar metrics/areas to running lists — building up a timeline per modality per patient-eye
+                # (used later to render side-by-side/tiled longitudinal comparison figures across all visits of an eye).
 
                 for mod, imgs in res_imgs.items():
                     if mod not in subject_data[sub_id_int]['mods']:
@@ -2198,6 +2156,8 @@ class ModelBuilder:
                     if gt_gt_val is not None:
                         subject_data[sub_id_int]['mods'][mod]['gt_gt_diff'].append(gt_gt_val)
 
+                # store a compact per-visit reconstruction record, can be used for trajectory plots later
+
                 subject_data[sub_id_int]['reconstructions'][visit_idx] = {
                     'pred_faf': res_imgs[modalities[0]].get('pred'),
                     'gt_faf': res_imgs[modalities[0]].get('ref'),
@@ -2218,13 +2178,13 @@ class ModelBuilder:
                 save_subject(self.args, volume_inf, df_row_dict, epoch=epoch, split=split,
                              tb_writer=None, baseline_volume=baseline_inf)
 
-        return metrics, subject_data
+        return metrics, subject_data # we return a list of per-visit scalar-metric dicts (for building an evaluation table/CSV), and a nester per-patient-eye per-modality collections of images/diff maps/metrics/areas, structured for building longitudinal tiled comparison figures
 
     def _reconstruct_visit(self, row_dict, sub_id_int, grid_coords, grid_shape, split='train', step_size=None,
                            allow_extrapolation=False):
         """
         Helper to reconstruct a single visit for a given subject.
-        Loads conditions, time_val, and retrieves the latent and transformation,
+        Loads conditions, time_val, and retrieves the latent,
         then runs INR decoder inference.
         Returns volume_inf.
 
@@ -2232,9 +2192,11 @@ class ModelBuilder:
         (used for future/extrapolated novel-visit generation; see Data.load_time/load_conditions).
         """
         with torch.no_grad():
-            conditions = self.datasets[split].load_conditions(row_dict, allow_extrapolation=allow_extrapolation).to(self.device)
+            conditions = self.datasets[split].load_conditions(row_dict, allow_extrapolation=allow_extrapolation).to(self.device)   # we load conditioning vector
+            # if the model is time-conditioned, we load the time value for this visit's timepoint
             time_val = self.datasets[split].load_time(row_dict, allow_extrapolation=allow_extrapolation).to(self.device) if self.args['inr_decoder'].get('time_as_input', False) else None
-            
+
+            # we select the correct latent code --> either per-visit latent (independent_visits=True) or a shared per-patient-eye latent (sub_id_int; default setting)
             if isinstance(sub_id_int, torch.Tensor):
                 latent_vec = sub_id_int
             else:
@@ -2245,6 +2207,7 @@ class ModelBuilder:
             if step_size is not None:
                 inf_kwargs['step_size'] = step_size
 
+            # run inference over the sampling grid with torch.no_grad() --> predicted image at this visit's timepoint
             volume_inf = self.inr_decoder[split].inference(
                 grid_coords,
                 latent_vec,
@@ -2725,8 +2688,8 @@ class ModelBuilder:
                 plot_labels = [v['label'] for v in visits_to_plot]
                 plot_is_gts = [v['is_gt'] for v in visits_to_plot]
 
-                # For the segmentation modality, caption each column with the lesion size MEASURED
-                # FROM THAT COLUMN'S MASK (predicted mask for Pred/novel columns, GT mask for GT
+                # For the segmentation modality, caption each column with the lesion size measured
+                # from that column's mask (predicted mask for Pred/novel columns, GT mask for GT
                 # columns) — never an interpolated/artificial size. mm^2 = (#GA px > 0.5) * px_area.
                 sublabels = None
                 if has_seg and mod == seg_key:
@@ -2947,7 +2910,7 @@ class ModelBuilder:
         tsv_file = self.args['dataset']['tsv_file'] if tsv_file is None else tsv_file
         self.datasets[split] = Data(self.args, tsv_file, split=split, df_loaded=df_loaded)
         # batch_by_eye (train only): one batch = one eye's full visit sequence, so the pooled soft-Dice
-        # becomes the TEMPORAL (stacked) Dice and the monotonicity penalty sees all the eye's visits.
+        # becomes the TEMPORAL (stacked) Dice
         if self.args['optimizer'].get('batch_by_eye', False) and split == 'train':
             from data_loading.dataset import EyeBatchSampler
             sampler = EyeBatchSampler(self.datasets[split].eye_groups(), shuffle=True)
@@ -2989,7 +2952,7 @@ class ModelBuilder:
     def _init_transformations(self, tfs=None, split='train'):
         n_subjects = self.datasets[split].n_unique_subjects  # one transformation per patient-eye
         shape = (n_subjects, max(self.args['inr_decoder']['tf_dim'],
-                                 0))  # TODO: change to 6 for 3D # at least 6 for rigid, 9 for rigid+scale
+                                 0))
         tfs = torch.zeros(shape).to(self.device) if tfs is None else tfs.to(self.device)
         self.transformations[split] = nn.Parameter(tfs) if self.args['inr_decoder'][
                                                                'tf_dim'] > 0 else tfs  # if tf_dim=0, set trafos to 0 and fix
@@ -3260,11 +3223,6 @@ class ModelBuilder:
         torch.manual_seed(self.args['seed'])
         torch.cuda.manual_seed(self.args['seed'])
         torch.cuda.manual_seed_all(self.args['seed'])
-        # Pin cuDNN so the same seed actually reproduces run-to-run on the same GPU.
-        # NOTE: we deliberately do NOT call torch.use_deterministic_algorithms(True):
-        # grid_sample backward (the latent-grid sampler) has no deterministic kernel and
-        # would raise at runtime. deterministic+benchmark=False removes autotuning drift,
-        # which is the dominant source of variance, without crashing.
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
