@@ -31,7 +31,7 @@ non-commercial research or evaluation only.
 ## How it works
 
 <p align="center">
-  <img src="docs/figures/Figure1.png" alt="GAP-INR training and test-time optimisation overview" width="900">
+  <img src="docs/Figure1.png" alt="GAP-INR training and test-time optimisation overview" width="900">
 </p>
 
 Each patient-eye is represented as a continuous field. One SIREN decoder is shared across the whole
