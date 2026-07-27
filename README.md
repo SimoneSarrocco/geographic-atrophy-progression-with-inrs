@@ -1,7 +1,7 @@
-# GAP-INR — Geographic-Atrophy Progression with Implicit Neural Representations
+# GAP-INR: Geographic Atrophy Progression using Implicit Neural Representations
 
-GAP-INR forecasts the progression of geographic atrophy (GA) in age-related macular degeneration from
-longitudinal fundus autofluorescence (FAF) imaging, using a conditional implicit neural representation
+We model the progression of geographic atrophy (GA) secondary to Age-related Macular Degeneration (AMD) from
+longitudinal Fundus Autofluorescence (FAF) imaging, using Implicit Neural Representations
 (INR). This repository covers data preparation, training, validation, testing, test-time adaptation,
 and the figures.
 
