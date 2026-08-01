@@ -1,4 +1,4 @@
-# GAP-INR: Geographic Atrophy Progression using Implicit Neural Representations
+# Modelling Geographic Atrophy Progression using Implicit Neural Representations
 
 We model the progression of geographic atrophy (GA) secondary to Age-related Macular Degeneration (AMD) from
 longitudinal Fundus Autofluorescence (FAF) imaging, using Implicit Neural Representations
