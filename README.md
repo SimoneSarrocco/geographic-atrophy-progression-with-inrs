@@ -21,7 +21,7 @@ and the figures.
 
 ## Attribution, license, citation
 
-This work builds on a prior open-source INR framework ([`CINeMA, Dannecker et al., 2026`](github.com/m-dannecker/CINeMA/tree/main)); see
+This work builds on a prior open-source INR framework ([`CINeMA, Dannecker et al., 2026`](https://github.com/m-dannecker/CINeMA/tree/main)); see
 [`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
 **except** `baselines/imageflownet/`, which is a derivative of [`ImageFlowNet, Liu et al., 2025`](https://github.com/KrishnaswamyLab/ImageFlowNet/tree/main), and carries the Yale
 Non-Commercial licence shipped with it
