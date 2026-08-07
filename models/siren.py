@@ -67,7 +67,7 @@ class Siren(nn.Module):
         # self.net = nn.Sequential(*self.net)
 
         # Shared output layer (no segmentation head at all): a SINGLE final layer maps to
-        # [recon | seg] together — the original GAP-INR behaviour. When enabled, the dedicated
+        # [recon | seg] together, the original GAP-INR behaviour. When enabled, the dedicated
         # reconstruction/segmentation heads and the seg branch are NOT built and seg_head_*/seg_branch
         # config is ignored. Channel order is preserved (sr_dims first, then n_seg_channels), so all
         # downstream slicing (output[..., :sr_dims] / output[..., sr_dims:]) is unchanged.
@@ -75,7 +75,7 @@ class Siren(nn.Module):
 
         # Define separate heads for Reconstruction and Segmentation
         self.seg_head_use_last_features = bool(seg_head_use_last_features) and outermost_linear and not self.shared_output
-        # Option B: a dedicated segmentation BRANCH — a short SIREN sub-network that taps a mid-trunk
+        # Option B: a dedicated segmentation BRANCH, a short SIREN sub-network that taps a mid-trunk
         # layer (default: penultimate) and is FiLM-modulated by the latent, then a final seg linear.
         # It shares the trunk up to the branch point but decodes labels through its own layers,
         # giving segmentation more capacity/decoupling than the penultimate-tap head while keeping the

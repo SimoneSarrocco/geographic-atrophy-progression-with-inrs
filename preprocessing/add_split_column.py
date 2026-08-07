@@ -21,6 +21,13 @@ Constraints enforced here:
 import pandas as pd
 import numpy as np
 
+# This module rewrites CSV_PATH in place at import time, there is no function to call. Refuse to be
+# imported, so a stray `import add_split_column` cannot silently overwrite the shipped split column.
+if __name__ != "__main__":
+    raise ImportError(
+        "add_split_column.py rewrites the clinical CSV in place as soon as it is loaded. "
+        "Run it as a script (python preprocessing/add_split_column.py), never import it.")
+
 # ---------------------------- Configuration ----------------------------
 # This MUST be the CSV that training actually reads (configs/config_data.yaml -> faf_ga.tsv_file),
 # and the column names below must match it (id_column = Eye_ID, patient = Patient_ID), otherwise the
@@ -37,7 +44,7 @@ MIN_VAL_VISITS = 2            # min visits per val patient-eye (to allow the opt
 SEED = 42
 # NOTE for this dataset: 30 patients / 37 eyes / 148 visits, every eye has 4 visits (so the
 # MIN_VAL_VISITS constraint is a no-op here, but is enforced generally). 70/15/15 by patient gives
-# roughly 21/4-5/4-5 patients — val/test are small, so treat their metrics as noisy.
+# roughly 21/4-5/4-5 patients, val/test are small, so treat their metrics as noisy.
 # ------------------------------------------------------------------------
 
 assert abs((TRAIN_FRAC + VAL_FRAC + TEST_FRAC) - 1.0) < 1e-6, "Fractions must sum to 1."

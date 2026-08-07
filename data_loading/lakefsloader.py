@@ -34,8 +34,8 @@ class LakeFSLoader():
         if not self.local_cache_path.endswith('/'):
             self.local_cache_path += '/'
 
-        # create a s3 client from keys defined in config if defined
-        # create a s3 client from keys defined in config if defined
+        # Build the S3 client from the supplied keys, or fall back to the environment's
+        # default credentials (~/.aws/credentials) when none are given.
         if endpoint and access_key and secret_key:
             verify_ssl = ca_path if ca_path else False
             self.lakefs = boto3.client(
@@ -50,20 +50,6 @@ class LakeFSLoader():
             self.lakefs = boto3.client('s3')
     
         
-    def check_num_missing_files(self, object_names: List):
-        """
-        Check the objects if they are already in the cache, returns the number which still need to be downloaded.
-
-        Return:
-            (int): Number of files that still need to be downloaded.
-        """
-        not_in_cache = 0
-        for obj_name in object_names:
-            file_path = Path(self.local_cache_path) / obj_name
-            if not os.path.exists(file_path):
-                not_in_cache += 1
-
-        return not_in_cache
     
 
     def get_local_and_obj_names(self, name: str) -> Tuple:
@@ -99,14 +85,6 @@ class LakeFSLoader():
         return local_name, obj_name
     
 
-    def get_branch_dir(self):
-        """
-        Gets the directory to the cached files
-
-        Return:
-            (pathlib.Path): The directory path of the cache corresponding to the lakefs branch id.
-        """
-        return Path(self.local_cache_path) / self.branch_id
     
 
     def check_file(self, file_name: str):
@@ -132,21 +110,6 @@ class LakeFSLoader():
                 raise e
 
 
-    def check_dir(self, dir_name: str):
-        """
-        Checks if a local file directory exists, if not downloads it and its subfiles.
-        Args:
-            local_name (string): The object name (s3 path starting with the branch id).
-        """
-        local_dir_name, obj_dir_name = self.get_local_and_obj_names(dir_name)
-        if not os.path.exists(local_dir_name):
-            os.makedirs(Path(local_dir_name), exist_ok=True)
-            # search for all matching objects in lakefs
-            dir_objects = self.read_s3_objects(prefix=obj_dir_name.replace(self.branch_id, ''))
-
-            # download
-            for dir_object in dir_objects:
-                self.check_file(dir_object)
 
     # In your lakefsloader.py file, update the read_s3_objects method:
 

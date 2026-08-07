@@ -68,14 +68,6 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def dict_to_simplenamespace(d):
-    """ Recursively converts dictionary to SimpleNamespace. """
-    if isinstance(d, dict):
-        for key, value in d.items():
-            d[key] = dict_to_simplenamespace(value)
-        return SimpleNamespace(**d)
-    else:
-        return d
 
 
 
@@ -84,14 +76,14 @@ class Criterion(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        # self.tf_weight = args['optimizer']['tf_weight']
+        # self.tf_weight = args['optimiser']['tf_weight']
         self.n_classes = args['inr_decoder']['out_dim'][-1]-1  # number of classes for segmentation excluding background
         self.sr_dims = sum(args['inr_decoder']['out_dim'][:-1])
         self.n_seg_channels = args['inr_decoder']['out_dim'][-1]
         self.has_seg = self.n_seg_channels > 0
         # Default reconstruction-loss weight (config-driven). Counterbalances the
         # CrossEntropy segmentation loss, which is otherwise ~10-50x larger than the
-        # MSE on [0,1]-normalized intensities and dominates training.
+        # MSE on [0,1]-normalised intensities and dominates training.
         self.sr_weight = args['optimizer'].get('sr_weight', 1.0)
         # Relative weight of the soft-Dice term inside the segmentation loss (NISF uses Dice + BCE;
         # here it is Dice + weighted CrossEntropy). Dice is robust to the strong class imbalance of
@@ -192,13 +184,6 @@ class Criterion(nn.Module):
         return loss
 
 
-def compute_ncc(prediction, reference):
-    mean_pred = np.mean(prediction)
-    mean_ref = np.mean(reference)
-    numerator = np.sum((prediction - mean_pred) * (reference - mean_ref))
-    denominator = np.sqrt(np.sum((prediction - mean_pred) ** 2) * np.sum((reference - mean_ref) ** 2))
-    ncc = numerator / denominator
-    return ncc.astype(np.float64)
 
 
 def embed2affine(embed):
@@ -223,28 +208,6 @@ def embed2affine(embed):
     return R, t
 
 
-def embed2affine2d(embed):
-    """
-    2D version of the embedding to affine transformation.
-    embed: (N, 3) --> [theta, tx, ty]
-    """
-    # 1. Rotation angle (theta)
-    theta = embed[..., 0]
-    
-    # 2. Translation vector (tx, ty)
-    t = embed[..., 1:3]
-    
-    # 3. Construct 2x2 Rotation Matrix
-    cos_t = torch.cos(theta)
-    sin_t = torch.sin(theta)
-    
-    # R = [[cos(theta), -sin(theta)],
-    #      [sin(theta),  cos(theta)]]
-    row1 = torch.stack([cos_t, -sin_t], dim=-1)
-    row2 = torch.stack([sin_t,  cos_t], dim=-1)
-    R = torch.stack([row1, row2], dim=-2) 
-    
-    return R, t 
 
 
 def euler2rot(theta):
@@ -268,9 +231,6 @@ def euler2rot(theta):
     return R
 
 
-def harmonize_labels(subject_seg, dataset):
-    # 2D FAF / geographic-atrophy data uses simple {0, 1} labels; no label harmonization is needed.
-    return subject_seg
 
 
 def to_device(x, device='cuda'):
@@ -299,31 +259,6 @@ def normalize_condition(args, condition_key, condition_values, cond_scale=None):
     return cv
 
 
-def generate_combinations(args_data, conditions, keys=None, idx=0, current=None, results=None):
-    if conditions is None: 
-        return [[]]
-    if keys is None:
-        keys = list(conditions.keys())
-    if current is None:
-        current = []
-    if results is None:
-        results = []
-
-    key = keys[idx]
-    values = conditions[key]['values']
-
-    for value in values:
-        if not conditions[key]['normed_values']:
-            value = normalize_condition(args_data, key, value)
-        else:
-            value = value * args_data['model_gen']['cond_scale']
-        next_current = current + [value]
-        if idx == len(keys) - 1:
-            results.append(next_current)
-        else:
-            generate_combinations(args_data, conditions, keys, idx + 1, next_current, results)
-
-    return results
 
 
 def generate_world_grid(args, normed=True, device='cpu'):
@@ -403,68 +338,6 @@ def generate_world_grid(args, normed=True, device='cpu'):
     return grid_coords, grid_shape  # , affine
 
 
-def save_renders(args, renders, temp_steps, condition_vectors, epoch, tb_writer=None):
-    # renders is of shape  (*spatial, num_modalities, n_conds, t)
-    # where spatial is (x, y, z) or (x, y)
-    shape = renders.shape
-    num_spatial = len(args['dataset']['world_bbox'])
-    num_mods = shape[num_spatial]
-    n_conds = shape[num_spatial + 1]
-    t = shape[num_spatial + 2]
-    is_2d = (num_spatial == 2)
-    
-    if isinstance(renders, torch.Tensor):
-        try:
-            renders = renders.detach().cpu().numpy()
-        except:
-            renders = renders.numpy()
-    mod_labels = args['dataset']['modalities']
-    if args['save_certainty_maps']:
-        seg_labels = [f"CertaintyMaps/{label}" for label in args['dataset']['label_names']]
-        mod_labels = mod_labels + seg_labels
-    for c in range(n_conds):
-        for i in range(len(mod_labels)):
-            is_certainty = "CertaintyMaps" in mod_labels[i]
-            # save each temporal frame individually
-            ext = '.nii.gz' if is_certainty else '.bmp'
-            for t_idx in range(t):
-                filename = f'{mod_labels[i]}_ga={temp_steps[t_idx]}_cond={c}_ep={epoch}{ext}'
-                save_img(renders[..., i, c, t_idx],
-                         output_path=args['output_dir'], filename=filename)
-    
-    # Print intensity ranges for debugging "black image" issues
-    for i, mod in enumerate(mod_labels):
-        mod_data = renders[..., i, :, :]
-        print(f"[Render Range] {mod}: min={mod_data.min():.4f}, max={mod_data.max():.4f}")
-    
-    print('Renders saved to {}'.format(args['output_dir']))
-
-    # Log rendered images to TensorBoard
-    if tb_writer is not None:
-        for c in range(n_conds):
-            for i in range(len(mod_labels)):
-                for t_idx in range(t):
-                    img_data = renders[..., i, c, t_idx]
-                    # For 3D: take middle slice; for 2D: use as-is
-                    if img_data.ndim == 3:
-                        mid = img_data.shape[2] // 2
-                        img_2d = img_data[:, :, mid]
-                    else:
-                        img_2d = img_data
-                    # Normalize to [0, 1] for display
-                    img_2d = img_2d.astype(np.float32)
-                    # Sanitize NaNs and Infs
-                    img_2d = np.nan_to_num(img_2d, nan=0.0, posinf=1.0, neginf=0.0)
-                    
-                    vmin, vmax = img_2d.min(), img_2d.max()
-                    if vmax > vmin:
-                        img_2d = (img_2d - vmin) / (vmax - vmin)
-                    else:
-                        img_2d = np.zeros_like(img_2d)
-                    
-                    # Fixed tag: renders/{mod_label}/cond{c}_t{t_val}
-                    tag = f'renders/{mod_labels[i]}/cond{c}_t{temp_steps[t_idx]}'
-                    tb_writer.add_image(tag, img_2d, epoch, dataformats='HW')
 
 
 def typecheck_img(img):
@@ -585,7 +458,7 @@ def save_subject(args, img, sub_row_df=None, sub_name=None, epoch=0, split='trai
                 else:
                     # Intensity Difference Map
                     base_mod = baseline_volume[..., i]
-                    # Normalize both to [0, 1] for fair comparison
+                    # Normalise both to [0, 1] for fair comparison
                     p_min, p_max = img_mod.min(), img_mod.max()
                     b_min, b_max = base_mod.min(), base_mod.max()
                     p_norm = (img_mod - p_min) / (p_max - p_min + 1e-8)
@@ -609,7 +482,7 @@ def save_img(img, output_path, filename):
     # Save 2D images as BMP.
     img_2d = img[:, :, 0] if len(img.shape) == 3 else img
     # No transpose needed - data is already in (H, W) = (row, col) order
-    # Normalize to 0-255 for BMP
+    # Normalise to 0-255 for BMP
     vmin, vmax = img_2d.min(), img_2d.max()
     if vmax > vmin:
         img_uint8 = ((img_2d - vmin) / (vmax - vmin) * 255).astype(np.uint8)
@@ -624,8 +497,8 @@ def assert_correct_coord_normalization(coords, min_val=-1.0, max_val=1.0, tolera
     """
     Args:
         coords: numpy array of shape (n, dim)
-        min_val: minimum allowed value of the normalized coordinates
-        max_val: maximum allowed value of the normalized coordinates
+        min_val: minimum allowed value of the normalised coordinates
+        max_val: maximum allowed value of the normalised coordinates
         tolerance: allowed overshoot beyond min_val/max_val (e.g. 0.1 for 10%)
     """
     # t_min = min_val - tolerance
@@ -665,19 +538,8 @@ class Simple2DImage:
 
 
 # add background halo to segmentation to allow masking of the brain in the postprsocessing step
-def add_background_halo(label_names, seg_nii, halo_width=1.5, background_label_str='BG'):
-    seg = seg_nii.get_fdata()
-    bg_label = label_names.index(background_label_str)
-    mask_bg = (seg>0).astype(np.float32)
-    mask_bg = (ndi.gaussian_filter(mask_bg, sigma=halo_width) > 0.001).astype(np.uint8) * bg_label
-    mask_bg[seg > 0] = seg[seg > 0]
-    return Simple2DImage(mask_bg, seg_nii.affine)
 
 
-def mask_nifti(nii, mask):
-    data = nii.get_fdata()
-    data *= mask
-    return Simple2DImage(data, nii.affine)
     
 
 
@@ -701,7 +563,7 @@ def compute_metrics(
     Compute metrics and log images + difference maps to TensorBoard.
 
     Images logged per modality per visit
-    ─────────────────────────────────────
+    -------------------------------------
     Always (intra-visit differences):
       {split}/{eye_id}/{mod}/{visit_id}_pred        predicted current visit
       {split}/{eye_id}/{mod}/{visit_id}_ref         GT current visit
@@ -719,7 +581,7 @@ def compute_metrics(
 
     Args:
         args:             experiment config dict
-        pred:             INR output — (H, W, C) for 2D or (H, W, Z, C) for 3D
+        pred:             INR output, (H, W, C) for 2D or (H, W, Z, C) for 3D
         affine:           affine matrix (np.ndarray)
         df_row_dict:      current visit row as dict
         epoch:            training epoch (used in filenames and TB step)
@@ -727,7 +589,7 @@ def compute_metrics(
         reg_type:         '2D' registration type (unused when commented out)
         bg_label:         segmentation background label index
         tb_writer:        TensorBoard SummaryWriter or None
-        baseline_volume:  model prediction at baseline age — same shape as pred, or None
+        baseline_volume:  model prediction at baseline age, same shape as pred, or None
         gt_baseline_row:  row dict of the chronologically first visit of this patient-eye, or None
     """
     pred = typecheck_img(pred)
@@ -759,228 +621,221 @@ def compute_metrics(
     elif bg_label is None:
         bg_label = 0
 
-    is_2d = (pred.ndim == 3)   # (H, W, C)
+    has_seg = args['inr_decoder']['out_dim'][-1] > 0
+    img_dict = {}
 
-    if is_2d:
-        # 2D PATH
-        has_seg = args['inr_decoder']['out_dim'][-1] > 0
-        img_dict = {}
+    for i, mod in enumerate(modalities):
+        is_seg = has_seg and (i == len(modalities) - 1)
+        ref_path = df_row_dict[mod]
+        mod_imgs = {}
 
-        for i, mod in enumerate(modalities):
-            is_seg = has_seg and (i == len(modalities) - 1)
-            ref_path = df_row_dict[mod]
-            mod_imgs = {}
+        # Load GT current visit normalised between [0,1]
+        ref_data = load_2d_modality(ref_path, is_seg, patient_stats=patient_stats, mod_index=i, args=args)
 
-            # Load GT current visit normalised between [0,1]
-            ref_data = load_2d_modality(ref_path, is_seg, patient_stats=patient_stats, mod_index=i, args=args)
+        # Crop reference using sampling_bbox if specified
+        sampling_bbox = args['dataset'].get('sampling_bbox')
+        if sampling_bbox is not None:
+            h_ref, w_ref = ref_data.shape[:2]
+            if len(sampling_bbox) == 2:
+                w_box, h_box = sampling_bbox
+                x_min = (w_ref - w_box) // 2
+                y_min = (h_ref - h_box) // 2
+                x_max = x_min + w_box - 1
+                y_max = y_min + h_box - 1
+            elif len(sampling_bbox) == 4:
+                x_min, y_min, x_max, y_max = sampling_bbox
+            ref_data = ref_data[y_min:y_max+1, x_min:x_max+1]
 
-            # Crop reference using sampling_bbox if specified
-            sampling_bbox = args['dataset'].get('sampling_bbox')
-            if sampling_bbox is not None:
-                h_ref, w_ref = ref_data.shape[:2]
-                if len(sampling_bbox) == 2:
-                    w_box, h_box = sampling_bbox
-                    x_min = (w_ref - w_box) // 2
-                    y_min = (h_ref - h_box) // 2
-                    x_max = x_min + w_box - 1
-                    y_max = y_min + h_box - 1
-                elif len(sampling_bbox) == 4:
-                    x_min, y_min, x_max, y_max = sampling_bbox
-                ref_data = ref_data[y_min:y_max+1, x_min:x_max+1]
+        # Extract prediction channel
+        if is_seg:
+            sr_dims = len(modalities) - 1
+            # n_seg_classes = pred.shape[-1] - sr_dims - 1
+            # we extract the soft segmentations
+            # seg_soft = pred[..., sr_dims + 1:sr_dims + 1 + n_seg_classes]
+            seg_hard = pred[..., sr_dims]
+            pred_data = seg_hard.astype(np.float32)
+            # pred_data = np.argmax(seg_soft, axis=-1).astype(np.float32)
+        else:
+            pred_data = pred[..., i].astype(np.float32)
+            # pred_data = _minmax(pred_data)
 
-            # Extract prediction channel
-            if is_seg:
-                sr_dims = len(modalities) - 1
-                # n_seg_classes = pred.shape[-1] - sr_dims - 1
-                # we extract the soft segmentations
-                # seg_soft = pred[..., sr_dims + 1:sr_dims + 1 + n_seg_classes]
-                seg_hard = pred[..., sr_dims]
-                pred_data = seg_hard.astype(np.float32)
-                # pred_data = np.argmax(seg_soft, axis=-1).astype(np.float32)
-            else:
-                pred_data = pred[..., i].astype(np.float32)
-                # pred_data = _minmax(pred_data)
-
-            # Center crop reference to match prediction shape if they differ
+        # Centre crop reference to match prediction shape if they differ
+        if ref_data.shape != pred_data.shape:
+            H_ref, W_ref = ref_data.shape
+            H_pred, W_pred = pred_data.shape
+            h_start = max(0, (H_ref - H_pred) // 2)
+            w_start = max(0, (W_ref - W_pred) // 2)
+            ref_data = ref_data[h_start:h_start + H_pred, w_start:w_start + W_pred]
             if ref_data.shape != pred_data.shape:
-                H_ref, W_ref = ref_data.shape
-                H_pred, W_pred = pred_data.shape
-                h_start = max(0, (H_ref - H_pred) // 2)
-                w_start = max(0, (W_ref - W_pred) // 2)
-                ref_data = ref_data[h_start:h_start + H_pred, w_start:w_start + W_pred]
-                if ref_data.shape != pred_data.shape:
-                    H_ref_new, W_ref_new = ref_data.shape
-                    h_start_pred = max(0, (H_pred - H_ref_new) // 2)
-                    w_start_pred = max(0, (W_pred - W_ref_new) // 2)
-                    pred_data = pred_data[h_start_pred:h_start_pred + H_ref_new, w_start_pred:w_start_pred + W_ref_new]
+                H_ref_new, W_ref_new = ref_data.shape
+                h_start_pred = max(0, (H_pred - H_ref_new) // 2)
+                w_start_pred = max(0, (W_pred - W_ref_new) // 2)
+                pred_data = pred_data[h_start_pred:h_start_pred + H_ref_new, w_start_pred:w_start_pred + W_ref_new]
 
-            # Optional METRIC-GRID resize: generate at the checkpoint's native world_bbox, then score
-            # on a fixed grid (dataset.metric_resize, e.g. 512 -> 256) to match another model's metric
-            # resolution (ImageFlowNet: crop620 -> 256). Resize COPIES only -- pred_data/ref_data stay
-            # native for the figures/saves/dumps below. Both pred and GT go to the same grid.
-            _mres = args['dataset'].get('metric_resize')
-            if _mres is not None:
-                _tgt = (int(_mres[0]), int(_mres[1]))
-                pred_m = pred_data if pred_data.shape == _tgt else _resize_2d(pred_data, _tgt, seg=is_seg)
-                ref_m = ref_data if ref_data.shape == _tgt else _resize_2d(ref_data, _tgt, seg=is_seg)
-            else:
-                pred_m, ref_m = pred_data, ref_data
+        # Optional METRIC-GRID resize: generate at the checkpoint's native world_bbox, then score
+        # on a fixed grid (dataset.metric_resize, e.g. 512 -> 256) to match another model's metric
+        # resolution (ImageFlowNet: crop620 -> 256). Resize COPIES only -- pred_data/ref_data stay
+        # native for the figures/saves/dumps below. Both pred and GT go to the same grid.
+        _mres = args['dataset'].get('metric_resize')
+        if _mres is not None:
+            _tgt = (int(_mres[0]), int(_mres[1]))
+            pred_m = pred_data if pred_data.shape == _tgt else _resize_2d(pred_data, _tgt, seg=is_seg)
+            ref_m = ref_data if ref_data.shape == _tgt else _resize_2d(ref_data, _tgt, seg=is_seg)
+        else:
+            pred_m, ref_m = pred_data, ref_data
 
-            # Metrics --> always computed between predicted current visit and corresponding GT current visit
-            if not is_seg:
-                metrics['PSNR'].append(psnr_metric(pred_m, ref_m, data_range=1.0))
-                metrics['SSIM'].append(ssim_metric(pred_m, ref_m, data_range=1.0))
-                _lp = _lpips_score(pred_m, ref_m)
-                if _lp is not None:
-                    metrics['LPIPS'].append(_lp)
-            else:
-                seg_m = compute_seg_overlap_metrics(pred_m, ref_m, bg_label)
-                metrics['DICE'].append(seg_m['DICE'])
-                metrics['Precision'].append(seg_m['Precision'])  # TP/(TP+FP): drops with false positives
-                metrics['Recall'].append(seg_m['Recall'])        # TP/(TP+FN): drops with missed GA
-                metrics['IoU'].append(seg_m['IoU'])
-                metrics['HD'].append(seg_m['HD'])                # Hausdorff distance (grid px)
+        # Metrics --> always computed between predicted current visit and corresponding GT current visit
+        if not is_seg:
+            metrics['PSNR'].append(psnr_metric(pred_m, ref_m, data_range=1.0))
+            metrics['SSIM'].append(ssim_metric(pred_m, ref_m, data_range=1.0))
+            _lp = _lpips_score(pred_m, ref_m)
+            if _lp is not None:
+                metrics['LPIPS'].append(_lp)
+        else:
+            seg_m = compute_seg_overlap_metrics(pred_m, ref_m, bg_label)
+            metrics['DICE'].append(seg_m['DICE'])
+            metrics['Precision'].append(seg_m['Precision'])  # TP/(TP+FP): drops with false positives
+            metrics['Recall'].append(seg_m['Recall'])        # TP/(TP+FN): drops with missed GA
+            metrics['IoU'].append(seg_m['IoU'])
+            metrics['HD'].append(seg_m['HD'])                # Hausdorff distance (grid px)
 
-            # File saves
-            if args.get('save_imgs', {}).get(split, False):
-                save_img(pred_data, args['output_dir'],
-                         f'{split}/{eye_id}/{mod}_{visit_id}_ep={epoch}.bmp')
-                save_img(ref_data, args['output_dir'],
-                         f'{split}/{eye_id}/{mod}_{visit_id}_ref.bmp')
+        # File saves
+        if args.get('save_imgs', {}).get(split, False):
+            save_img(pred_data, args['output_dir'],
+                     f'{split}/{eye_id}/{mod}_{visit_id}_ep={epoch}.bmp')
+            save_img(ref_data, args['output_dir'],
+                     f'{split}/{eye_id}/{mod}_{visit_id}_ref.bmp')
 
-            # Image Collection for Tiling
-            if return_images:
-                # mod_imgs['pred'] = _to_tb(pred_data, is_seg)
-                # mod_imgs['ref'] = _to_tb(ref_data, is_seg)
-                mod_imgs['pred'] = pred_data  # predicted current visit
-                mod_imgs['ref'] = ref_data  # GT current visit
-                if not is_seg:
-                    # mod_imgs['diff_intra'] = _signed_diff_map(pred_data, ref_data)
-                    mod_imgs['diff_intra'] = _signed_diff_map_gray(pred_data, ref_data)  # difference map between predicted and GT current visit
-                else:
-                    mod_imgs['diff_intra'] = _seg_tpfpfn_map(pred_data, ref_data)  # segmentation change map between predicted and GT current visit
-
-            # Individual TensorBoard Logging (skip if tiling)
-            if tb_writer is not None and not return_images:
-                tb_writer.add_image(
-                    f'{split}/{eye_id}/{mod}/{visit_id}_pred',
-                    _to_tb(pred_data, is_seg), epoch, dataformats='HW')
-                tb_writer.add_image(
-                    f'{split}/{eye_id}/{mod}/{visit_id}_ref',
-                    _to_tb(ref_data, is_seg), epoch, dataformats='HW')
-
-                if not is_seg:
-                    tb_writer.add_image(
-                        f'{split}/{eye_id}/{mod}/{visit_id}_diff_pred_gt',
-                        _signed_diff_map_gray(pred_data, ref_data), epoch, dataformats='HWC')
-                else:
-                    tb_writer.add_image(
-                        f'{split}/{eye_id}/{mod}/{visit_id}_diff_pred_gt_seg',
-                        _seg_tpfpfn_map(pred_data, ref_data), epoch, dataformats='HWC')
-
-            # Longitudinal Difference Maps --> comparison between model's current predicted visit and the predicted baseline visit --> to see if the model is learning temporal dynamics or just predicting the same image across different timepoints
-            if baseline_volume is not None:
-                sr_dims = len(modalities) - 1
-                base_n_seg_classes = baseline_volume.shape[-1] - sr_dims - 1
-                
-                if not is_seg:
-                    # base_mod = _minmax(baseline_volume[..., i].astype(np.float32))
-                    base_mod = baseline_volume[..., i].astype(np.float32)  # predicted baseline visit
-                    diff_long = _signed_diff_map_gray(pred_data, base_mod)  # difference map between predicted current visit and predicted baseline visit
-                    if return_images: mod_imgs['diff_long'] = diff_long
-                    if tb_writer is not None and not return_images:
-                        tb_writer.add_image(f'{split}/{eye_id}/longitudinal_diff/{mod}/{visit_id}', diff_long, epoch, dataformats='HW')
-                else:
-                    if base_n_seg_classes > 0:
-                        # base_mask = np.argmax(baseline_volume[..., sr_dims + 1:sr_dims + 1 + base_n_seg_classes], axis=-1).astype(np.float32)
-                        base_mask = baseline_volume[..., sr_dims].astype(np.float32)  # predicted baseline segmentation
-                    else:
-                        base_mask = (baseline_volume[..., i] > 0).astype(np.float32)
-                    change_rgb = _seg_change_map(pred_data, base_mask)  # segmentation change map between predicted current visit and predicted baseline visit
-                    if return_images: mod_imgs['change_long'] = change_rgb
-                    if tb_writer is not None and not return_images:
-                        tb_writer.add_image(f'{split}/{eye_id}/longitudinal_change/{mod}/{visit_id}', change_rgb, epoch, dataformats='HWC')
-
-            # GT-level difference maps (new)
-            if gt_baseline_row is not None:
-                gt_base_path = gt_baseline_row.get(mod, None)
-                if gt_base_path is not None:
-                    gt_base_data = load_2d_modality(gt_base_path, is_seg, patient_stats=patient_stats, mod_index=i, args=args)  # GT baseline visit
-
-                    # Crop baseline using sampling_bbox if specified
-                    if sampling_bbox is not None:
-                        h_gt, w_gt = gt_base_data.shape[:2]
-                        if len(sampling_bbox) == 2:
-                            w_box, h_box = sampling_bbox
-                            x_min = (w_gt - w_box) // 2
-                            y_min = (h_gt - h_box) // 2
-                            x_max = x_min + w_box - 1
-                            y_max = y_min + h_box - 1
-                        elif len(sampling_bbox) == 4:
-                            x_min, y_min, x_max, y_max = sampling_bbox
-                        gt_base_data = gt_base_data[y_min:y_max+1, x_min:x_max+1]
-
-                    # Center crop baseline to match prediction shape if they differ
-                    if gt_base_data.shape != pred_data.shape:
-                        H_gt, W_gt = gt_base_data.shape
-                        H_pred, W_pred = pred_data.shape
-                        h_start = max(0, (H_gt - H_pred) // 2)
-                        w_start = max(0, (W_gt - W_pred) // 2)
-                        gt_base_data = gt_base_data[h_start:h_start + H_pred, w_start:w_start + W_pred]
-                        if gt_base_data.shape != pred_data.shape:
-                            H_gt_new, W_gt_new = gt_base_data.shape
-                            h_start_pred = max(0, (H_pred - H_gt_new) // 2)
-                            w_start_pred = max(0, (W_pred - W_gt_new) // 2)
-                            pred_data = pred_data[h_start_pred:h_start_pred + H_gt_new, w_start_pred:w_start_pred + W_gt_new]
-                            # If pred_data was cropped, also crop ref_data to keep them aligned
-                            if ref_data.shape != pred_data.shape:
-                                ref_data = ref_data[h_start_pred:h_start_pred + H_gt_new, w_start_pred:w_start_pred + W_gt_new]
-
-                    if not is_seg:
-                        diff_gt_base = _signed_diff_map_gray(pred_data, gt_base_data)  # difference map between predicted current visit and GT baseline visit
-                        diff_gt_gt = _signed_diff_map_gray(ref_data, gt_base_data)  # difference map between GT current visit and GT baseline visit
-                        if return_images:
-                            mod_imgs['gt_long_diff'] = diff_gt_base  # difference map between predicted current visit and GT baseline visit
-                            mod_imgs['gt_gt_diff'] = diff_gt_gt  # difference map between GT current visit and GT baseline visit
-                        if tb_writer is not None and not return_images:
-                            tb_writer.add_image(f'{split}/{eye_id}/gt_longitudinal_diff/{mod}/{visit_id}', diff_gt_base, epoch, dataformats='HW')
-                            tb_writer.add_image(f'{split}/{eye_id}/gt_gt_diff/{mod}/{visit_id}', diff_gt_gt, epoch, dataformats='HW')
-                    else:
-                        change_gt_base = _seg_change_map(pred_data, gt_base_data)  # segmentation change map between predicted current visit and GT baseline visit
-                        if return_images: mod_imgs['gt_long_change'] = change_gt_base
-                        if tb_writer is not None and not return_images:
-                            tb_writer.add_image(f'{split}/{eye_id}/gt_longitudinal_change/{mod}/{visit_id}', change_gt_base, epoch, dataformats='HWC')
-
-                        gt_gt_change = _seg_change_map(ref_data, gt_base_data)  # segmentation change map between GT current visit and GT baseline visit
-                        if return_images: mod_imgs['gt_gt_change'] = gt_gt_change
-                        if tb_writer is not None and not return_images:
-                            tb_writer.add_image(f'{split}/{eye_id}/gt_gt_change/{mod}/{visit_id}', gt_gt_change, epoch, dataformats='HWC')
-            
-            img_dict[mod] = mod_imgs
-
-        # Combined held-out LOSS: a SINGLE trade-off number that incorporates BOTH the segmentation
-        # and the reconstruction quality, so a checkpoint/config can be selected on it directly (the
-        # user-requested "validation loss") in addition to the held-out DICE. Composition mirrors the
-        # training loss: seg term (1 - GA Dice) + recon_weight * recon MSE. MSE is recovered from PSNR
-        # (data_range=1 -> MSE = 10^(-PSNR/10)). Lower is better.
-        if metrics['DICE'] and metrics['PSNR']:
-            _srw = float(args['optimizer'].get('outer_sr_weight',
-                                               args['optimizer'].get('sr_weight', 1.0)))
-            _mse = float(np.mean([10.0 ** (-float(p) / 10.0) for p in metrics['PSNR']]))
-            _segloss = 1.0 - float(np.mean(metrics['DICE']))
-            metrics['LOSS'] = [float(_segloss + _srw * _mse)]
-
+        # Image Collection for Tiling
         if return_images:
-            return metrics, img_dict
+            # mod_imgs['pred'] = _to_tb(pred_data, is_seg)
+            # mod_imgs['ref'] = _to_tb(ref_data, is_seg)
+            mod_imgs['pred'] = pred_data  # predicted current visit
+            mod_imgs['ref'] = ref_data  # GT current visit
+            if not is_seg:
+                # mod_imgs['diff_intra'] = _signed_diff_map(pred_data, ref_data)
+                mod_imgs['diff_intra'] = _signed_diff_map_gray(pred_data, ref_data)  # difference map between predicted and GT current visit
+            else:
+                mod_imgs['diff_intra'] = _seg_tpfpfn_map(pred_data, ref_data)  # segmentation change map between predicted and GT current visit
+
+        # Individual TensorBoard Logging (skip if tiling)
+        if tb_writer is not None and not return_images:
+            tb_writer.add_image(
+                f'{split}/{eye_id}/{mod}/{visit_id}_pred',
+                _to_tb(pred_data, is_seg), epoch, dataformats='HW')
+            tb_writer.add_image(
+                f'{split}/{eye_id}/{mod}/{visit_id}_ref',
+                _to_tb(ref_data, is_seg), epoch, dataformats='HW')
+
+            if not is_seg:
+                tb_writer.add_image(
+                    f'{split}/{eye_id}/{mod}/{visit_id}_diff_pred_gt',
+                    _signed_diff_map_gray(pred_data, ref_data), epoch, dataformats='HWC')
+            else:
+                tb_writer.add_image(
+                    f'{split}/{eye_id}/{mod}/{visit_id}_diff_pred_gt_seg',
+                    _seg_tpfpfn_map(pred_data, ref_data), epoch, dataformats='HWC')
+
+        # Longitudinal Difference Maps --> comparison between model's current predicted visit and the predicted baseline visit --> to see if the model is learning temporal dynamics or just predicting the same image across different timepoints
+        if baseline_volume is not None:
+            sr_dims = len(modalities) - 1
+            base_n_seg_classes = baseline_volume.shape[-1] - sr_dims - 1
+                
+            if not is_seg:
+                # base_mod = _minmax(baseline_volume[..., i].astype(np.float32))
+                base_mod = baseline_volume[..., i].astype(np.float32)  # predicted baseline visit
+                diff_long = _signed_diff_map_gray(pred_data, base_mod)  # difference map between predicted current visit and predicted baseline visit
+                if return_images: mod_imgs['diff_long'] = diff_long
+                if tb_writer is not None and not return_images:
+                    tb_writer.add_image(f'{split}/{eye_id}/longitudinal_diff/{mod}/{visit_id}', diff_long, epoch, dataformats='HW')
+            else:
+                if base_n_seg_classes > 0:
+                    # base_mask = np.argmax(baseline_volume[..., sr_dims + 1:sr_dims + 1 + base_n_seg_classes], axis=-1).astype(np.float32)
+                    base_mask = baseline_volume[..., sr_dims].astype(np.float32)  # predicted baseline segmentation
+                else:
+                    base_mask = (baseline_volume[..., i] > 0).astype(np.float32)
+                change_rgb = _seg_change_map(pred_data, base_mask)  # segmentation change map between predicted current visit and predicted baseline visit
+                if return_images: mod_imgs['change_long'] = change_rgb
+                if tb_writer is not None and not return_images:
+                    tb_writer.add_image(f'{split}/{eye_id}/longitudinal_change/{mod}/{visit_id}', change_rgb, epoch, dataformats='HWC')
+
+        # GT-level difference maps (new)
+        if gt_baseline_row is not None:
+            gt_base_path = gt_baseline_row.get(mod, None)
+            if gt_base_path is not None:
+                gt_base_data = load_2d_modality(gt_base_path, is_seg, patient_stats=patient_stats, mod_index=i, args=args)  # GT baseline visit
+
+                # Crop baseline using sampling_bbox if specified
+                if sampling_bbox is not None:
+                    h_gt, w_gt = gt_base_data.shape[:2]
+                    if len(sampling_bbox) == 2:
+                        w_box, h_box = sampling_bbox
+                        x_min = (w_gt - w_box) // 2
+                        y_min = (h_gt - h_box) // 2
+                        x_max = x_min + w_box - 1
+                        y_max = y_min + h_box - 1
+                    elif len(sampling_bbox) == 4:
+                        x_min, y_min, x_max, y_max = sampling_bbox
+                    gt_base_data = gt_base_data[y_min:y_max+1, x_min:x_max+1]
+
+                # Centre crop baseline to match prediction shape if they differ
+                if gt_base_data.shape != pred_data.shape:
+                    H_gt, W_gt = gt_base_data.shape
+                    H_pred, W_pred = pred_data.shape
+                    h_start = max(0, (H_gt - H_pred) // 2)
+                    w_start = max(0, (W_gt - W_pred) // 2)
+                    gt_base_data = gt_base_data[h_start:h_start + H_pred, w_start:w_start + W_pred]
+                    if gt_base_data.shape != pred_data.shape:
+                        H_gt_new, W_gt_new = gt_base_data.shape
+                        h_start_pred = max(0, (H_pred - H_gt_new) // 2)
+                        w_start_pred = max(0, (W_pred - W_gt_new) // 2)
+                        pred_data = pred_data[h_start_pred:h_start_pred + H_gt_new, w_start_pred:w_start_pred + W_gt_new]
+                        # If pred_data was cropped, also crop ref_data to keep them aligned
+                        if ref_data.shape != pred_data.shape:
+                            ref_data = ref_data[h_start_pred:h_start_pred + H_gt_new, w_start_pred:w_start_pred + W_gt_new]
+
+                if not is_seg:
+                    diff_gt_base = _signed_diff_map_gray(pred_data, gt_base_data)  # difference map between predicted current visit and GT baseline visit
+                    diff_gt_gt = _signed_diff_map_gray(ref_data, gt_base_data)  # difference map between GT current visit and GT baseline visit
+                    if return_images:
+                        mod_imgs['gt_long_diff'] = diff_gt_base  # difference map between predicted current visit and GT baseline visit
+                        mod_imgs['gt_gt_diff'] = diff_gt_gt  # difference map between GT current visit and GT baseline visit
+                    if tb_writer is not None and not return_images:
+                        tb_writer.add_image(f'{split}/{eye_id}/gt_longitudinal_diff/{mod}/{visit_id}', diff_gt_base, epoch, dataformats='HW')
+                        tb_writer.add_image(f'{split}/{eye_id}/gt_gt_diff/{mod}/{visit_id}', diff_gt_gt, epoch, dataformats='HW')
+                else:
+                    change_gt_base = _seg_change_map(pred_data, gt_base_data)  # segmentation change map between predicted current visit and GT baseline visit
+                    if return_images: mod_imgs['gt_long_change'] = change_gt_base
+                    if tb_writer is not None and not return_images:
+                        tb_writer.add_image(f'{split}/{eye_id}/gt_longitudinal_change/{mod}/{visit_id}', change_gt_base, epoch, dataformats='HWC')
+
+                    gt_gt_change = _seg_change_map(ref_data, gt_base_data)  # segmentation change map between GT current visit and GT baseline visit
+                    if return_images: mod_imgs['gt_gt_change'] = gt_gt_change
+                    if tb_writer is not None and not return_images:
+                        tb_writer.add_image(f'{split}/{eye_id}/gt_gt_change/{mod}/{visit_id}', gt_gt_change, epoch, dataformats='HWC')
+            
+        img_dict[mod] = mod_imgs
+
+    # Combined held-out LOSS: a SINGLE trade-off number that incorporates BOTH the segmentation
+    # and the reconstruction quality, so a checkpoint/config can be selected on it directly (the
+    # user-requested "validation loss") in addition to the held-out DICE. Composition mirrors the
+    # training loss: seg term (1 - GA Dice) + recon_weight * recon MSE. MSE is recovered from PSNR
+    # (data_range=1 -> MSE = 10^(-PSNR/10)). Lower is better.
+    if metrics['DICE'] and metrics['PSNR']:
+        _srw = float(args['optimizer'].get('outer_sr_weight',
+                                           args['optimizer'].get('sr_weight', 1.0)))
+        _mse = float(np.mean([10.0 ** (-float(p) / 10.0) for p in metrics['PSNR']]))
+        _segloss = 1.0 - float(np.mean(metrics['DICE']))
+        metrics['LOSS'] = [float(_segloss + _srw * _mse)]
 
     if return_images:
         return metrics, img_dict
     return metrics
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Private helpers — all pure functions, no side effects
-# ─────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------
+# Private helpers, all pure functions, no side effects
+# ------------------------------------------------------------
 
 def _minmax(x: np.ndarray) -> np.ndarray:
     """Min-max normalise to [0, 1]. Returns zeros if range is zero."""
@@ -991,7 +846,7 @@ def _minmax(x: np.ndarray) -> np.ndarray:
 
 
 def center_crop_2d(img: np.ndarray, sampling_bbox) -> np.ndarray:
-    """Center-crop a 2D (H, W) or 3D (H, W, C) array using sampling_bbox."""
+    """Centre-crop a 2D (H, W) or 3D (H, W, C) array using sampling_bbox."""
     if sampling_bbox is None:
         return img
     h, w = img.shape[:2]
@@ -1015,7 +870,7 @@ def _to_tb(img: np.ndarray, is_seg: bool) -> np.ndarray:
     per-image min-max stretch. Per-image min-max put GT and prediction on different scales and
     visually hid low-contrast / off-intensity reconstructions; clipping keeps them on the same scale
     and consistent with the composite figures (which use fixed vmin=0, vmax=1). `is_seg` is kept for
-    signature compatibility — segmentation masks are already {0,1} so clipping is a no-op for them.
+    signature compatibility, segmentation masks are already {0,1} so clipping is a no-op for them.
     """
     img = img.astype(np.float32)
     img = np.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0)
@@ -1064,10 +919,10 @@ def _signed_diff_map_gray(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def _seg_tpfpfn_map(pred: np.ndarray, ref: np.ndarray) -> np.ndarray:
     """
     RGB map comparing predicted segmentation to GT for the SAME visit.
-      Green  [0.2, 0.8, 0.4]  — True positive  (pred=GA, GT=GA)
-      Red    [0.9, 0.1, 0.1]  — False positive  (pred=GA, GT=BG)
-      Blue   [0.2, 0.4, 0.9]  — False negative  (pred=BG, GT=GA)
-      Black  [0,   0,   0  ]  — True negative   (pred=BG, GT=BG)
+      Green  [0.2, 0.8, 0.4], True positive  (pred=GA, GT=GA)
+      Red    [0.9, 0.1, 0.1], False positive  (pred=GA, GT=BG)
+      Blue   [0.2, 0.4, 0.9], False negative  (pred=BG, GT=GA)
+      Black  [0,   0,   0  ], True negative   (pred=BG, GT=BG)
     Both pred and ref are expected to be float arrays with 0=BG, >0=GA.
     Returns (H, W, 3) float32.
     """
@@ -1083,10 +938,10 @@ def _seg_tpfpfn_map(pred: np.ndarray, ref: np.ndarray) -> np.ndarray:
 def _seg_change_map(current: np.ndarray, baseline: np.ndarray) -> np.ndarray:
     """
     RGB map comparing current segmentation to a baseline segmentation.
-      Green  — stable GA (both current and baseline positive)
-      Red    — new / grown GA (current positive, baseline negative)
-      Blue   — resolved GA (current negative, baseline positive)
-      Black  — stable background
+      Green, stable GA (both current and baseline positive)
+      Red, new / grown GA (current positive, baseline negative)
+      Blue, resolved GA (current negative, baseline positive)
+      Black, stable background
     Returns (H, W, 3) float32.
     """
     c = (current  > 0).astype(bool)
@@ -1103,11 +958,11 @@ def _match_geometry(data: np.ndarray, is_seg: bool, args: dict) -> np.ndarray:
     lands on the EXACT field of view the model (and its predictions) live on.
 
     The model is trained on coordinates normalised over the image the dataset produces. For FAF-GA the
-    dataset (data_loading/dataset.py) center-crops native (768) -> `crop_before_resize` (e.g. 620),
+    dataset (data_loading/dataset.py) centre-crops native (768) -> `crop_before_resize` (e.g. 620),
     then resizes that crop to `world_bbox` (e.g. 512), mask NEAREST / FAF BILINEAR. The SIREN's
     [-1, 1] domain therefore spans the 620-crop FOV. If GT is loaded WITHOUT this step (native, then
-    naively center-cropped to the prediction's pixel SHAPE) it lands on a DIFFERENT, tighter FOV
-    (the central-512 direct crop — no optic disc), so PSNR/SSIM/DICE compare misaligned fields of
+    naively centre-cropped to the prediction's pixel SHAPE) it lands on a DIFFERENT, tighter FOV
+    (the central-512 direct crop, no optic disc), so PSNR/SSIM/DICE compare misaligned fields of
     view. Mirroring dataset.py:806-826 here keeps GT and prediction on the same FOV.
 
     Only the geometric step is replicated (crop_before_resize -> resize, or resize-to-world_bbox when
@@ -1144,7 +999,7 @@ def load_2d_modality(path: str, is_seg: bool, patient_stats: dict = None, mod_in
     otherwise using individual-visit stats.
     For segmentation:    binarised to {0, 1}.
 
-    patient_stats['min']/['max'] may be per-intensity-modality arrays (shape (n_mod,)) — the
+    patient_stats['min']/['max'] may be per-intensity-modality arrays (shape (n_mod,)), the
     same layout produced by Data._compute_patient_stats and used in load_coords_and_values.
     `mod_index` selects this modality's entry so the normalisation matches training exactly
     (the previous scalar form only worked for a single intensity modality and threw for >1).
@@ -1243,17 +1098,17 @@ def compute_seg_overlap_metrics(pred, ref, bg_label):
     """Overlap metrics for the foreground (non-background) labels, averaged over labels.
 
     Returns a dict with:
-      DICE      = 2·TP / (2·TP + FP + FN)   — overlap; INSENSITIVE to small FP when the GT is large.
-      Precision = TP / (TP + FP)            — drops when there are false positives (e.g. GA predicted
+      DICE      = 2·TP / (2·TP + FP + FN), overlap; INSENSITIVE to small FP when the GT is large.
+      Precision = TP / (TP + FP), drops when there are false positives (e.g. GA predicted
                                               far from the real lesion). Use this to catch the failure
                                               mode Dice hides.
-      Recall    = TP / (TP + FN)            — drops when real GA is missed.
-      IoU       = TP / (TP + FP + FN)       — Jaccard; stricter than Dice.
+      Recall    = TP / (TP + FN), drops when real GA is missed.
+      IoU       = TP / (TP + FP + FN), Jaccard; stricter than Dice.
 
     Background labels 0 and `bg_label` are ignored, matching compute_dice. When both pred and ref are
     empty for every foreground label, all metrics are 1.0 (a true empty match). When pred predicts
     nothing for a label that IS present in the GT, precision is defined as 1.0 (no false positives)
-    while recall is 0.0 — so a "predict nothing" degenerate solution shows up as low recall, and a
+    while recall is 0.0, so a "predict nothing" degenerate solution shows up as low recall, and a
     "predict everywhere" solution shows up as low precision.
     """
     if pred.shape != ref.shape:
@@ -1386,11 +1241,11 @@ def log_loss(loss, epoch, split, log=True, tb_writer=None, global_step=None):
 
 def normalize_intensities(values, norm_type, has_seg=True):
     """
-    Normalize values according to norm_type
+    Normalise values according to norm_type
     Args:
         values: numpy array of shape (n_samples, n_modalities)
         norm_type: str, 'minmax' or 'zscore'
-        has_seg: bool, if True the last column is segmentation (excluded from normalization)
+        has_seg: bool, if True the last column is segmentation (excluded from normalisation)
     Returns:
         normalized_values: numpy array of shape (n_samples, n_modalities)
     """
@@ -1415,21 +1270,6 @@ def normalize_intensities(values, norm_type, has_seg=True):
     return values
 
 
-def denormalize_conditions(args, cond_key, values):
-    """
-    Denormalize values according to the constraints in the dataset
-    Args:
-        args: arguments
-        cond_key: key of the condition in the dataset
-        values: numpy array of shape (n_samples, n_modalities)
-    Returns:
-        denormalized_values: numpy array of shape (n_samples, n_modalities)
-    """
-    c_min = args['dataset']['constraints'][cond_key]['min']
-    c_max = args['dataset']['constraints'][cond_key]['max']
-    c_scale = args['model_gen']['cond_scale']
-    values = (values / c_scale + 1) / 2 * (c_max - c_min) + c_min
-    return values
 
 
 def fig_to_numpy(fig):
@@ -1491,34 +1331,6 @@ def make_longitudinal_tiled_figure(images_row1, images_row2, labels, row1_name="
     return fig
 
 
-def make_longitudinal_singlerow_figure(ground_truth, preds, labels, row_name="Future Predictions",
-                                   title=None):
-    """
-    Create a tiled figure with one row.
-    images_row: list of (H, W) or (H, W, 3) arrays
-    labels: list of column labels (e.g. visit IDs)
-    """
-
-    n_cols = len(preds) + 1
-    fig, axes = plt.subplots(1, n_cols, figsize=(n_cols * 4, 4), squeeze=False)
-
-    if title:
-        fig.suptitle(title, fontsize=16)
-
-    axes[0, 0].imshow(ground_truth, cmap='gray', vmin=0, vmax=1)
-    axes[0, 0].set_title(f"{row_name}\n{'Last GT Visit'}")
-    axes[0, 0].axis('off')
-    for c in range(1, n_cols):
-        img = preds[c-1]
-        if img.ndim == 2:
-            axes[0, c].imshow(img, cmap='gray', vmin=0, vmax=1)
-        else:
-            axes[0, c].imshow(img)
-        axes[0, c].set_title(f"{row_name}\n{labels[c-1]}")
-        axes[0, c].axis('off')
-
-    plt.tight_layout()
-    return fig
 
 
 def make_interleaved_figure(images, labels, is_gt_flags, title=None, sublabels=None):
@@ -1528,7 +1340,7 @@ def make_interleaved_figure(images, labels, is_gt_flags, title=None, sublabels=N
     Args:
         images:       list of (H, W) or (H, W, 3) arrays, sorted chronologically
         labels:       list of column labels (e.g. 'GT@0w', 'Pred@6w', ...)
-        is_gt_flags:  list of bool — True for GT columns, False for predicted
+        is_gt_flags:  list of bool, True for GT columns, False for predicted
         title:        optional figure title
         sublabels:    optional list of per-column captions shown under each panel
                       (e.g. predicted lesion sizes 'Pred 6.42 mm²'); None entries are skipped
@@ -1549,18 +1361,18 @@ def make_interleaved_figure(images, labels, is_gt_flags, title=None, sublabels=N
             ax.imshow(img)
         ax.set_title(labels[c], fontsize=9)
         if sublabels is not None and c < len(sublabels) and sublabels[c]:
-            colour = '#2ecc71' if is_gt_flags[c] else '#e67e22'
-            ax.set_xlabel(sublabels[c], fontsize=9, color=colour, fontweight='semibold')
+            color = '#2ecc71' if is_gt_flags[c] else '#e67e22'
+            ax.set_xlabel(sublabels[c], fontsize=9, color=color, fontweight='semibold')
 
         # Hide ticks and labels but keep spines visible for the border
         ax.set_xticks([])
         ax.set_yticks([])
 
         # Coloured border: green for GT, orange for predictions
-        colour = '#2ecc71' if is_gt_flags[c] else '#e67e22'
+        color = '#2ecc71' if is_gt_flags[c] else '#e67e22'
         for spine in ax.spines.values():
             spine.set_visible(True)
-            spine.set_edgecolor(colour)
+            spine.set_edgecolor(color)
             spine.set_linewidth(3)
 
     plt.tight_layout()

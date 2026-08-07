@@ -5,7 +5,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-from data_loading.lakefsloader import LakeFSLoader
+from data_loading.lakefs_config import make_loader, check_connection, LakeFSConfigError
 
 # We need the path resolution logic
 def extract_faf_ga_path(row_dict, mod_key):
@@ -42,7 +42,16 @@ def extract_faf_ga_path(row_dict, mod_key):
         return path
 
 
-def download_dataset(dataset_key, config_path='./configs/config_data.yaml', lakefs_cfg_path='./configs/lakefs_cfg.yaml', num_workers=8):
+def download_dataset(dataset_key, config_path='./configs/config_data.yaml',
+                     lakefs_cfg_path=None, num_workers=8):
+    """Pre-fetch every image the dataset section needs into the local cache.
+
+    No-op with a printed note when lakeFS is not configured, since the images are then
+    expected to be on local disk already (docs/DATA.md). Credentials, repository,
+    branch and cache directory all come from data_loading/lakefs_config.py, so this
+    and training always read the same place."""
+    if lakefs_cfg_path:
+        os.environ['GAPINR_LAKEFS_CFG'] = lakefs_cfg_path
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
         
@@ -56,30 +65,14 @@ def download_dataset(dataset_key, config_path='./configs/config_data.yaml', lake
         return
         
     print(f"Preparing to download files for {dataset_key}...")
-    
-    # Load credentials
-    lakefs_config = ds_config['lakefs']
-    if os.path.exists(lakefs_cfg_path):
-        with open(lakefs_cfg_path, 'r') as f:
-            cfg = yaml.safe_load(f)
-    else:
-        print("LakeFS credentials config not found!")
-        cfg = {}
 
-    # Determine cache path dynamically to ensure it contains repo_name
-    cache_path = lakefs_config['cache_path']
-    if lakefs_config['repo'] not in cache_path:
-        cache_path = os.path.join(cache_path, lakefs_config['repo'])
-
-    lakefs_loader = LakeFSLoader(
-        repo_name=lakefs_config['repo'],
-        branch_id=lakefs_config['branch'],
-        local_cache_path=cache_path,
-        endpoint=cfg.get('lakefs_endpoint', cfg.get('s3_endpoint')),
-        ca_path=cfg.get('ca_path', cfg.get('ca_bundle')),
-        access_key=cfg.get('lakefs_access_key', cfg.get('access_key')),
-        secret_key=cfg.get('lakefs_secret_key', cfg.get('secret_key'))
-    )
+    try:
+        lakefs_loader = make_loader(ds_config)
+    except LakeFSConfigError as e:
+        print(f"[lakeFS] {e}")
+        return
+    if lakefs_loader is None:
+        return          # not configured: images are read from local disk
 
     tsv_file = ds_config.get('tsv_file')
     if not tsv_file or not os.path.exists(tsv_file):
@@ -198,10 +191,34 @@ def download_dataset(dataset_key, config_path='./configs/config_data.yaml', lake
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download dataset files from LakeFS")
-    parser.add_argument('--dataset', type=str, default='faf_ga', help='Dataset to download from config_data.yaml (faf_ga)')
-    parser.add_argument('--config', type=str, default='./configs/config_data.yaml', help='Path to config file')
-    parser.add_argument('--workers', type=int, default=16, help='Number of parallel workers')
-    
+    parser = argparse.ArgumentParser(
+        description="Pre-fetch a dataset's images from lakeFS into the local cache.",
+        epilog="lakeFS is optional. With no credentials the training code reads images "
+               "from local disk instead, and this script is not needed. See docs/DATA.md "
+               "and configs/lakefs_cfg.example.yaml.")
+    parser.add_argument('--dataset', type=str, default='faf_ga',
+                        help="Dataset section in config_data.yaml (default: faf_ga)")
+    parser.add_argument('--config', type=str, default='./configs/config_data.yaml',
+                        help="Path to config_data.yaml")
+    parser.add_argument('--lakefs-cfg', type=str, default=None,
+                        help="Path to the credentials file. Default: configs/lakefs_cfg.yaml, "
+                             "or $GAPINR_LAKEFS_CFG, or `config_path` in the dataset's "
+                             "`lakefs:` block.")
+    parser.add_argument('--workers', type=int, default=16, help="Parallel download workers")
+    parser.add_argument('--check', action='store_true',
+                        help="Print the resolved lakeFS settings and try one request, then "
+                             "exit. Use this to verify credentials before a long run.")
     args = parser.parse_args()
-    download_dataset(args.dataset, args.config, num_workers=args.workers)
+
+    if args.check:
+        if args.lakefs_cfg:
+            os.environ['GAPINR_LAKEFS_CFG'] = args.lakefs_cfg
+        with open(args.config, 'r') as f:
+            cfg = yaml.safe_load(f)
+        if args.dataset not in cfg:
+            raise SystemExit(f"Dataset section '{args.dataset}' not found in {args.config}. "
+                             f"Available: {', '.join(cfg)}")
+        raise SystemExit(0 if check_connection(cfg[args.dataset]) else 1)
+
+    download_dataset(args.dataset, args.config,
+                     lakefs_cfg_path=args.lakefs_cfg, num_workers=args.workers)

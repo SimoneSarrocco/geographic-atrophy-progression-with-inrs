@@ -6,8 +6,8 @@ protocol: see its [README](../baselines/imageflownet/README.md) to reproduce the
 and its [ATTRIBUTION.md](../baselines/imageflownet/ATTRIBUTION.md) for provenance and licensing.
 
 > That directory is a derivative of [ImageFlowNet](https://github.com/ChenLiu-1996/ImageFlowNet) and
-> is **not** covered by this repository's Apache-2.0 licence — it is governed by the Yale
-> Non-Commercial licence shipped alongside it. See the "Scope of this license" note at the end of the
+> is **not** covered by this repository's Apache-2.0 licence. It is governed by the Yale
+> Non-Commercial licence shipped alongside it. See the "Scope of this licence" note at the end of the
 > top-level [`LICENSE`](../LICENSE).
 
 ## Methods
@@ -41,7 +41,7 @@ method's working resolution are different things: the ImageFlowNet models run at
 
 The two split contracts count eyes differently on purpose, and both are correct. GAP-INR's
 `expected_split.yaml` lists the eyes with a modality path in the CSV (25 train); `eval_spec.py` lists
-the *longitudinal* eyes — at least two visits whose FAF **and** GA-mask files are both on disk (23
+the *longitudinal* eyes, meaning at least two visits whose FAF **and** GA-mask files are both on disk (23
 train). Val (5) and test (6) are identical under both, because every val/test visit is complete. So
 the **scored test set is the same for every method** regardless of internal filtering.
 
@@ -73,7 +73,7 @@ python eval_faf_ga.py --model I2SBUNet        --target-dim '(256,256)' --diffusi
 
 ### Paper configuration
 
-- **Resolution 256×256, seed 1** — this is the configuration reported in the paper.
+- **Resolution 256×256, seed 1.** This is the configuration reported in the paper.
 - `--diffusion-interval` (I2SBUNet only, default 100) is the number of diffusion steps and **must
   match** between training and evaluation. T-UNet / ImageFlowNetODE ignore it.
 - **Scenario 1** = single-pair forecast (older visit → newer visit). **Scenario 2** = full patient
@@ -82,7 +82,7 @@ python eval_faf_ga.py --model I2SBUNet        --target-dim '(256,256)' --diffusi
 
 Each run writes a `leave_one_out_summary_test_<best_type>.csv` (`leave_one_out_summary_test_seg_dice.csv`
 with the default `--best-type seg_dice`) in the same format as GAP-INR's
-[`summarize_eval.py`](../summarize_eval.py), so the final comparison table reads identical fields
+[`summarise_eval.py`](../summarise_eval.py), so the final comparison table reads identical fields
 (DICE / PSNR / SSIM / Hausdorff distance / lesion-area MAE, interpolation vs extrapolation) across
 every method. A copy-forward reference (predict the source visit unchanged) is scored alongside as
 the floor a forecaster has to beat.

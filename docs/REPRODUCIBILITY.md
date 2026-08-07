@@ -25,9 +25,9 @@ reproduces the main result unchanged. Key hyperparameters:
 | Latent | `latent_dim: [256, 32, 32]` (256 channels on a 32×32 grid), one per eye |
 | Conditioning | FiLM vector of two scalars: weeks-from-baseline (the temporal axis) and age at visit (`faf_ga_twovar_wktemporal_512`; `cond_dims` is derived from the enabled conditions at runtime) |
 | Heads / loss | FAF reconstruction (MSE) + GA segmentation (CE + Dice); `sr_weight: 10`, `seg_weight: 1` |
-| Optimization | `lr_inr: 1.0e-4`, `lr_latent: 5.0e-3`, `n_samples: 10000` |
+| Optimisation | `lr_inr: 1.0e-4`, `lr_latent: 5.0e-3`, `n_samples: 10000` |
 | Schedule | `epochs.train: 50`, `epochs.val: 25` (TTA budget) |
-| Data | 620 center-crop → 512 grid (`faf_ga_twovar_wktemporal_512`) |
+| Data | 620 centre-crop → 512 grid (`faf_ga_twovar_wktemporal_512`) |
 
 Train and evaluate it:
 
@@ -37,18 +37,17 @@ python evaluate.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth \
     --holdout_strategy leave_one_out --test on
 ```
 
-`<run>` is the timestamped directory `run.py` prints as `Output directory:` — it is nested under the
+`<run>` is the timestamped directory `run.py` prints as `Output directory:`. It is nested under the
 config's `output_dir`, so the full path is `runs/faf_ga/faf_ga_twovar_wktemporal_512_<timestamp>_loc/`.
 
-`evaluate.py` writes `evaluation_*/leave_one_out_summary.csv` — held-out DICE / PSNR / SSIM and
+`evaluate.py` writes `evaluation_*/leave_one_out_summary.csv`, holding held-out DICE / PSNR / SSIM and
 lesion-area MAE, grouped **interpolation vs extrapolation**. That is the GAP-INR row of the results
 table.
 
 ### Forecast scenarios
 
-- **Scenario 1 (single pair):** forecast a target visit from one earlier visit.
-- **Scenario 2 (full history):** adapt the eye's latent on all available past visits (TTA), then
-  forecast. Use `evaluate.py --support_k K` to fit on the first `K` visits and predict the rest.
+The forecasting scenarios and the commands that run them are in the README, under
+[The workflow](../README.md#the-workflow-train-validate-test-adapt).
 
 ## 2. Changing the model
 
@@ -80,16 +79,14 @@ Select on the validation leave-one-out metric, not on test.
 The comparison methods are the **ImageFlowNet family** (ImageFlowNet ODE, Time-conditioned U-Net,
 Time-aware diffusion), trained and evaluated on the **same split and test eyes**, at **256×256, seed
 1** (the paper configuration). The protocol is in [`BASELINES.md`](BASELINES.md); the code is in
-[`../baselines/imageflownet/`](../baselines/imageflownet/), under a non-commercial license.
+[`../baselines/imageflownet/`](../baselines/imageflownet/), under a non-commercial licence.
 
-## 4. Diagnostics and figures
+## 4. Figures
 
 ```bash
-# Is the temporal pathway responsive (not collapsed)?
-python temporal_sensitivity.py --checkpoint runs/faf_ga/<run>/checkpoint_best.pth --split test
-
-# Multi-eye predicted-trajectory figure (faithful across progression rates)
-python plot_trajectories.py --csv runs/faf_ga/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test
+# Per-eye GA-area progression panel (the paper figure)
+python plot_lesion_size_trajectories.py \
+    --csv runs/faf_ga/<run>/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv --split test \
+    --holdout-dir runs/faf_ga/<run>/evaluation_*/holdout_timeline_arrays
 ```
 
-See [`PIPELINE.md`](PIPELINE.md) for the full train → eval → diagnose workflow and what to monitor.

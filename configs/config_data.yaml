@@ -15,7 +15,7 @@ faf_ga: &faf_ga
   modalities: ['faf_path', 'ga_mask_path']
   # OPTIONAL remote store. lakeFS (https://lakefs.io) is an open-source data-versioning layer over
   # an S3-compatible bucket; images are fetched to `cache_path` on first use. Leave the loader
-  # unconfigured (no credentials file) to read images directly from local disk instead — see
+  # unconfigured (no credentials file) to read images directly from local disk instead, see
   # docs/DATA.md. Credentials are read from an external file (never committed); see
   # configs/lakefs_cfg.example.yaml.
   lakefs:
@@ -43,7 +43,7 @@ faf_ga: &faf_ga
         priority: 10
   label_names: ['BG', 'GeographicAtrophy']
   class_weights: [1.0, 1.0]    # Cross-entropy class weights.
-  world_bbox: [620, 620]  # center-crop to 620x620 to remove the influence of the black frames introduced by image registration
+  world_bbox: [620, 620]  # centre-crop to 620x620 to remove the influence of the black frames introduced by image registration
   sampling_strategy: 'all' # 'all' or 'mask' --> 'all': we sample coordinates/pixels from the whole image; 'mask': we sample coordinates/pixels only inside the GA lesion
   normalize_values: 'minmax'
   visit_week_map:
@@ -58,7 +58,7 @@ faf_ga: &faf_ga
 # Sampling-grid variants of the base section. All of them keep its conditioning (FiLM over
 # weeks-from-baseline + age at visit, temporal axis = weeks_from_baseline) and differ ONLY in the
 # geometry three keys describe:
-#   crop_before_resize  center-crop applied to the native image BEFORE resizing (the field of view)
+#   crop_before_resize  centre-crop applied to the native image BEFORE resizing (the field of view)
 #   world_bbox          the grid the INR is sampled on (the resolution)
 #   sampling_bbox       null -> use world_bbox; a value here crops the grid instead of resizing to it
 # GAP-INR is a coordinate-based decoder, so a checkpoint trained at one grid can be EVALUATED at any
@@ -66,7 +66,7 @@ faf_ga: &faf_ga
 # training (it is what config_model.yaml selects and what the paper model used).
 # ---------------------------------------------------------------------------------------------
 
-# PAPER MODEL. 620 center-crop -> 512 grid. Train with this (config_model.yaml `config_data`).
+# PAPER MODEL. 620 centre-crop -> 512 grid. Train with this (config_model.yaml `config_data`).
 faf_ga_twovar_wktemporal_512:
   <<: *faf_ga
   crop_before_resize: [620, 620]
@@ -82,7 +82,7 @@ faf_ga_twovar_wktemporal_256:
   world_bbox: [256, 256]
   sampling_bbox: null
 
-# EVAL ONLY -- native 620 center-crop, no resize. The interpolation grid (GAP-INR only; the
+# EVAL ONLY -- native 620 centre-crop, no resize. The interpolation grid (GAP-INR only; the
 # forward-only baselines cannot interpolate a held-out interior visit).
 faf_ga_twovar_wktemporal_620:
   <<: *faf_ga

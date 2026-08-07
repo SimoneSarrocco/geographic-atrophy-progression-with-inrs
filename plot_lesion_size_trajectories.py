@@ -1,20 +1,41 @@
-"""Modern per-eye GA-area TRAJECTORY figure for the GAP-INR paper (test set).
+"""Per-eye GA-area progression panel. This is the per-patient figure in the paper.
 
-One clean panel per test eye + a prominent AVERAGE panel, showing how GAP-INR tracks GA (lesion) size
-over time vs the ground truth, with reconstructed / held-out / interpolated / extrapolated points
-colour-coded to MATCH the GAP-INR timeline figure (blue=observed recon, gold=hold-out, teal=new
-interpolation, purple=new extrapolation). Ground truth is a black line with filled dots; the model's
-continuous estimate is a smooth crimson line. A shaded band marks the extrapolated (future) region.
+One panel per eye of the chosen split, laid out on a single row. Ground truth is a
+black line with filled dots, the model's continuous estimate is a smooth crimson
+line, and a shaded band marks the extrapolated region. Prediction types are told
+apart by marker shape rather than by colour, so all predictions keep one colour.
 
-Inputs:
-  --csv      lesion_areas{label}_epoch_{N}.csv  (build_model): cols Patient_Eye, Set
-             ({split}_opt | {split}_eval), Weeks, GT_Area_mm2, Pred_Area_mm2, Dice.
-  --new-csv  OPTIONAL new-time-point predictions: cols Patient_Eye, Weeks, Pred_Area_mm2,
-             Kind ({interp|extrap}).
+    python plot_lesion_size_trajectories.py --csv <lesion_areas_*.csv> --split test \\
+        [--holdout-dir DIR] [--new-csv NEW.csv] [--ncols N] [--out-dir DIR]
 
-    python plot_lesion_size_trajectories.py --csv <lesion_areas.csv> --split test [--new-csv <new.csv>]
+INPUT
 
-Output: <out_dir>/lesion_size_trajectories.{png,pdf}
+  --csv          Required. A lesion_areas{label}_epoch_{N}.csv from build_model
+                 (analyze_and_plot_lesion_sizes), in
+                 runs/faf_ga/<run>/evaluation_*/lesion_analysis/. Columns:
+                 Patient_Eye, Set ("<split>_opt" or "<split>_eval"), Weeks,
+                 GT_Area_mm2, Pred_Area_mm2, Dice.
+
+  --holdout-dir  Optional, but use it for a paper figure. A build_model
+                 holdout_timeline_arrays/ directory with one <eye>.npz per eye.
+                 With it, every existing visit is plotted as its leave-one-out
+                 prediction: that visit held out, the latent fitted on the others.
+                 Without it, the observed visits come from --csv, where they are
+                 reconstructions of visits the latent already saw. Those look better
+                 than the model's real forecasting ability.
+
+  --new-csv      Optional predictions at times that have no ground truth. Columns:
+                 Patient_Eye, Weeks, Pred_Area_mm2, Kind ("interp" or "extrap").
+
+  --ncols        Panels per row. Default is all eyes on one row.
+  --out-dir      Output directory. Default is alongside --csv.
+
+OUTPUT
+
+  <out-dir>/lesion_size_trajectories.png
+  <out-dir>/lesion_size_trajectories.pdf
+
+Uses pandas, numpy, scipy and matplotlib only. No torch, no checkpoint, no GPU.
 """
 import argparse, os
 import numpy as np

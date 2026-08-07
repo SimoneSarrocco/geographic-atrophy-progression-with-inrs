@@ -42,37 +42,12 @@ def parse_args():
                              "config. 'on' runs test() (LOO interp+extrap on the held-out test eyes) "
                              "inside __init__; 'off' skips it. Default: use the checkpoint's test.activate.")
     
-    # Overrides for optimization parameters
-    parser.add_argument("--epochs_val", type=int, help="Override number of validation optimization epochs")
+    # Overrides for optimisation parameters
+    parser.add_argument("--epochs_val", type=int, help="Override the number of validation optimisation epochs")
     parser.add_argument("--lr_latent", type=float, help="Override validation learning rate for latents")
     parser.add_argument("--val_latent_init", type=str, choices=["random", "nearest_train"],
-                        help="Override validation latent initialization strategy")
+                        help="Override the validation latent initialisation strategy")
     
-    # Cross-model comparison dump (consumed by models/comparison/make_comparison_figure.py).
-    parser.add_argument("--dump_root", type=str, default=None,
-                        help="If set, write cross-model comparison .npz dumps under this root "
-                             "(one per held-out test eye, target = its last visit).")
-    parser.add_argument("--dump_scenario", type=str, choices=["matched", "full", "interp"], default="full",
-                        help="'full' = GAP-INR at full capability (all n-1 visits, LOO-last); "
-                             "'matched' = baseline-only, pair with --support_k 1; "
-                             "'interp' = per-visit interior dumps (pair with --holdout_strategy "
-                             "leave_one_out) for the interpolation comparison + trajectory figure.")
-    parser.add_argument("--dump_method", type=str, default=None,
-                        help="Comparison method key (default: gap_inr for full, gap_inr_k1 for matched).")
-    parser.add_argument("--dump_newvisits_root", type=str, default=None,
-                        help="If set, write NEW-time-point GAP-INR FAF/mask dumps (interpolated "
-                             "midpoints + extrapolated future visits, no GT) under this root for "
-                             "make_trajectory.py --new-root.")
-    parser.add_argument("--dump_newvisits_scenario", type=str, default="static",
-                        help="Scenario subdir for the new-visit dumps (default static; match "
-                             "make_trajectory.py --new-scenario).")
-    parser.add_argument("--dump_static_root", type=str, default=None,
-                        help="If set, write Part-2 STATIC-segmentation dumps (one per observed test "
-                             "visit) under this root for comparison vs NISF/MetaSeg.")
-    parser.add_argument("--dump_static_method", type=str, default=None,
-                        help="Static method key: gap_inr_pervisit (independent_visits) or "
-                             "gap_inr_perpatient (one latent/eye). Default inferred from the config.")
-
     # Resolution / sampling-grid override (INR is resolution-agnostic -> eval at any grid, no retrain)
     parser.add_argument("--config_data", type=str, default=None,
                         help="Evaluate at a different dataset SECTION from configs/config_data.yaml "
@@ -193,31 +168,6 @@ def main():
         args["optimizer"]["val_latent_init"] = args_cmd.val_latent_init
         print(f"Overriding optimizer.val_latent_init -> {args_cmd.val_latent_init}")
         
-    if args_cmd.dump_root is not None:
-        _method = args_cmd.dump_method or ("gap_inr_k1" if args_cmd.dump_scenario == "matched" else "gap_inr")
-        args["comparison_dump"] = {"enable": True, "root": args_cmd.dump_root,
-                                   "scenario": args_cmd.dump_scenario, "method": _method,
-                                   "split": "test"}
-        print(f"Comparison dump ENABLED -> root={args_cmd.dump_root} scenario={args_cmd.dump_scenario} "
-              f"method={_method} (held-out test eyes, target=last visit)")
-
-    if args_cmd.dump_newvisits_root is not None:
-        _nvmethod = args_cmd.dump_method or ("gap_inr_k1" if args_cmd.dump_scenario == "matched" else "gap_inr")
-        args["comparison_dump_newvisits"] = {"enable": True, "root": args_cmd.dump_newvisits_root,
-                                             "scenario": args_cmd.dump_newvisits_scenario,
-                                             "method": _nvmethod, "split": "test"}
-        print(f"New-visit dump ENABLED -> root={args_cmd.dump_newvisits_root} "
-              f"scenario={args_cmd.dump_newvisits_scenario} method={_nvmethod} "
-              f"(interpolated + extrapolated new visits, no GT)")
-
-    if args_cmd.dump_static_root is not None:
-        _indep = args.get("dataset", {}).get("independent_visits", False)
-        _smethod = args_cmd.dump_static_method or ("gap_inr_pervisit" if _indep else "gap_inr_perpatient")
-        args["comparison_dump_static"] = {"enable": True, "root": args_cmd.dump_static_root,
-                                          "method": _smethod, "split": "test"}
-        print(f"Static-seg dump ENABLED -> root={args_cmd.dump_static_root} method={_smethod} "
-              f"(every observed test visit)")
-
     if args_cmd.device is not None:
         args["device"] = args_cmd.device
     else:
@@ -306,10 +256,10 @@ def main():
     try:
         import subprocess, sys
         here = os.path.dirname(os.path.abspath(__file__))
-        cmd = [sys.executable, os.path.join(here, "summarize_eval.py"),
+        cmd = [sys.executable, os.path.join(here, "summarise_eval.py"),
                "--eval_dir", args["output_dir"]]
-        # Pass the frozen data CSV so summarize_eval also emits the minor/major GA-growth buckets
-        # (ImageFlowNet framing). Growth uses the CANONICAL 620->512 mask grid (summarize_eval's
+        # Pass the frozen data CSV so summarise_eval also emits the minor/major GA-growth buckets
+        # (ImageFlowNet framing). Growth uses the CANONICAL 620->512 mask grid (summarise_eval's
         # defaults), identical to the ImageFlowNet baselines' eval_faf_ga.py, so the buckets are method-independent -- regardless of
         # whether this GAP-INR run itself scores at 620 or 512.
         _csv = (args.get("dataset") or {}).get("tsv_file")

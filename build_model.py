@@ -39,9 +39,6 @@ class _GatedImageWriter:
         if self._log_images and self._writer is not None:
             self._writer.add_image(*a, **k)
 
-    def add_images(self, *a, **k):
-        if self._log_images and self._writer is not None:
-            self._writer.add_images(*a, **k)
 
     def add_figure(self, *a, **k):
         if self._log_images and self._writer is not None:
@@ -69,7 +66,7 @@ class ModelBuilder:
         self.global_steps = {'train': 0, 'val': 0}
         self.global_val_steps_monotonic = 0
         # Anchor tensors for the TTA latent regulariser (set per split in _init_validation):
-        # None -> regularise toward 0 (random init); tensor -> regularise toward that prior.
+        # None -> regularise towards 0 (random init); tensor -> regularise towards that prior.
         self._latent_anchor = {}
         # Best-checkpoint selection on the held-out (val-eval) DICE.
         self.best_val_dice = -float('inf')
@@ -205,7 +202,7 @@ class ModelBuilder:
         # otherwise mirror validation: 'leave_one_out' holds out EACH visit in turn so the test
         # table gets BOTH interpolation (non-last positions) and extrapolation (last position);
         # 'last'/'specific'/'none' run a single round. Dir naming is f"{split}_{eval|opt}_{tag}",
-        # and tag 'holdout_V{p}' is what summarize_eval parses for the interp/extrap split.
+        # and tag 'holdout_V{p}' is what summarise_eval parses for the interp/extrap split.
         holdout_cfg = self.args.get('validation', {})
         strategy = holdout_cfg.get('holdout_strategy', 'last')
         test_support_k = self.args.get('test', {}).get('support_k', None)
@@ -644,13 +641,13 @@ class ModelBuilder:
             self._log_reconstruction_figures(train_data, 'train', epoch_train, tb_writer, tensorboard_tag='existing_visits')
 
             # if we have one latent per patient-eye (default strategy)
-            # for each of the three picked eyes: load and center-crop every real GT visit, computes weeks-from-baseline --> chronological gt_visits
+            # for each of the three picked eyes: load and centre-crop every real GT visit, computes weeks-from-baseline --> chronological gt_visits
             # if future=False --> interpolation: target prediction weeks are the midpoints between every pair of consecutive real GT visits
             # if future=True --> extrapolation: target prediction weeks are the last GT visit's week plus configured offsets (default [26, 52, 78])
             # _generate_novel_visits does the following:
             # for each target week, builds an interpolated/extrapolated input row , computed (and caches) the synthesised image at that novel timepoint
             # for each modality, merges the real GT visits and the synthetic predicted visits into one chronologically sorted list,
-            # center-crops everything to common dimensions, and, for segmentation modality,
+            # centre-crops everything to common dimensions, and, for segmentation modality,
             # captions each column with the lesion area measured directly from that column's own mask (GT mask for GT columns, predicted mask for prediction columns)
             # builds an interleaved figure alternating GT and predicted columns along the time axis and logs it to Tensorboard
 
@@ -699,7 +696,7 @@ class ModelBuilder:
                     if getattr(self, '_last_round_eval_metrics', None):
                         loo_eval_metrics.extend(self._last_round_eval_metrics)
                 # Averaged-across-positions held-out metrics = mean over every (eye, hold-out position)
-                # held-out visit — the proper leave-one-out generalisation summary. Reuses log_metrics
+                # held-out visit, the proper leave-one-out generalisation summary. Reuses log_metrics
                 # (TB scalars + JSON under split 'val_eval_loo_avg') with the flattened per-visit list.
                 if loo_eval_metrics:
                     print(f"\n{'='*60}\n  Leave-One-Out AVERAGED held-out metrics "
@@ -724,10 +721,10 @@ class ModelBuilder:
                 if d is not None:
                     val_eval_dices.append(d)
 
-            # Mean held-out DICE across rounds — the model-selection metric.
+            # Mean held-out DICE across rounds, the model-selection metric.
             self._last_val_eval_dice = float(np.mean(val_eval_dices)) if val_eval_dices else None
 
-            # Mean held-out combined LOSS (recon + seg) across the same held-out visits — the
+            # Mean held-out combined LOSS (recon + seg) across the same held-out visits, the
             # alternative single-number selection criterion. Pulled from the per-visit metric dicts.
             _loss_metrics = (loo_eval_metrics if strategy == 'leave_one_out'
                              else (getattr(self, '_last_round_eval_metrics', None) or []))
@@ -742,14 +739,14 @@ class ModelBuilder:
                  self._generate_novel_visits(epoch=epoch_train, split='val', subject_ids=picked_val_subs,
                                              grid_coords=grid_coords, grid_shape=grid_shape, future=False)
 
-        # Analyze lesion sizes progression for FAF-GA dataset after each training and validation round
+        # Analyse lesion sizes progression for FAF-GA dataset after each training and validation round
         if is_val_epoch and self.args['dataset'].get('dataset_name') == 'faf_ga':
             self.analyze_and_plot_lesion_sizes(epoch_train)
             # GA-growth overlay/onset figures (per-eye models only; cheap for the few val eyes)
             # samples 10 weeks from 0 to last_observed_week + 48
             # at each week, reconstructs the visit and extracts the thresholded GA mask (on the first pass also a background FAF for the overlay)
             # passes the sequence of (week, mask) pairs, the FAF background, and the mm2-per-pixel scale factor (via _lesion_px_area_mm2) to an external helper (save_seg_growth_figure)
-            # which renders a boundary overlay (mask contour colored by week, visualising spatial GA growth direction, not just area) plus a per-pixel "onset" map (roughly: at which week did each pixel first become GA)
+            # which renders a boundary overlay (mask contour coloured by week, visualising spatial GA growth direction, not just area) plus a per-pixel "onset" map (roughly: at which week did each pixel first become GA)
             # it's purely a qualitative growth visualisation, only saved to disk
             self.plot_seg_growth_figures(epoch_train, 'val', picked_val_subs)
 
@@ -812,7 +809,7 @@ class ModelBuilder:
         evaluation (self._eval_sets) -- it does NOT re-reconstruct existing visits.
 
         Lesion area = (#GA pixels on the sampling grid) * ScaleXSlo * ScaleYSlo, computed
-        identically for prediction and ground truth (both on the same center-cropped grid).
+        identically for prediction and ground truth (both on the same centre-cropped grid).
 
         Args:
             epoch_train: epoch tag used in filenames / TB steps.
@@ -1098,7 +1095,7 @@ class ModelBuilder:
                                     traj_w = np.asarray(traj_w); traj_a = np.asarray(traj_a)
                                     plt.plot(traj_w, traj_a, color='#455A64', ls='-', lw=1.3, alpha=0.6,
                                              zorder=1, label='Pred trajectory (continuous)')
-                                    # discrete query points, color-coded interpolation vs extrapolation
+                                    # discrete query points, colour-coded interpolation vs extrapolation
                                     interp, extrap = traj_w <= w_max, traj_w > w_max
                                     if interp.any():
                                         plt.scatter(traj_w[interp], traj_a[interp], color='#2E7D32', marker='D',
@@ -1109,7 +1106,7 @@ class ModelBuilder:
                                     plt.axvline(x=w_max, color='#9E9E9E', ls=':', alpha=0.8)
 
                         plt.title(f"Lesion Trajectory: {eye_id} ({set_titles[set_name]})\n"
-                                  f"observed-visit MAE = {eye_mae:.3f} mm$^2$  —  Epoch {epoch_train}",
+                                  f"observed-visit MAE = {eye_mae:.3f} mm$^2$, epoch {epoch_train}",
                                   fontsize=11, fontweight='bold')
                         plt.xlabel("Weeks from Baseline", fontsize=10)
                         plt.ylabel("Lesion Area (mm$^2$)", fontsize=10)
@@ -1125,7 +1122,7 @@ class ModelBuilder:
     def plot_seg_growth_figures(self, epoch_train, split, subject_ids, label=''):
         """Per-eye GA-growth visualisation: reconstruct the predicted GA mask at a dense set
         of weeks (observed -> extrapolated) from the eye's latent, then render a boundary
-        overlay (color = week) + a per-pixel onset 'volume' map (see seg_growth.py).
+        overlay (colour = week) + a per-pixel onset 'volume' map (see seg_growth.py).
         Per-eye models only (needs the FiLM/time conditioning to vary the mask with time)."""
         if self.args['dataset'].get('independent_visits', False):
             return
@@ -1202,7 +1199,7 @@ class ModelBuilder:
         id_col = self.args['dataset'].get('id_column', 'subject_id')
         modalities = self.args['dataset']['modalities']
         
-        # Color theme: orange for train, blue for val
+        # Colour theme: orange for train, blue for val
         color = '#FFA726' if split == 'train' else '#29B6F6'
         
         bg_label = self.args['dataset'].get('label_names', ['BG']).index('BG') if 'BG' in self.args['dataset'].get('label_names', []) else 0
@@ -1233,16 +1230,6 @@ class ModelBuilder:
 
         _newvisit_rows = []                        # new-timepoint predicted GA areas (--new-csv schema)
         # Optional: dump NEW-visit FAF/mask cases (no GT) for make_trajectory.py --new-root.
-        _nvd = self.args.get('comparison_dump_newvisits') or {}
-        _nv_dump = None
-        if _nvd.get('enable') and split == _nvd.get('split', 'test'):
-            try:
-                import sys as _sys
-                _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'comparison'))
-                import dump_io as _dump_io
-                _nv_dump = (_dump_io, _nvd['root'], _nvd.get('method', 'gap_inr'), _nvd.get('scenario', 'static'))
-            except Exception as _e:
-                print(f"[newvisits_dump] skipped (import failed): {_e}")
         for sub_id in subject_ids:
             sub_df = df[df['sub_id_int'] == sub_id]
             if sub_df.empty:
@@ -1388,19 +1375,11 @@ class ModelBuilder:
                     
                 for w in pred_weeks_int:
                     new_row = self._get_interpolated_row_dict(actual_rows, w)
-                    # Check cache first to avoid redundant reconstructions
-                    cache_key = (split, sub_id, round(float(w), 3))
-                    if cache_key in self.reconstruction_cache:
-                        pred_imgs = self.reconstruction_cache[cache_key]
-                    else:
-                        latent_vec = self.latents[split][sub_id:sub_id+1]
-                        try:
-                            volume_inf = self._reconstruct_visit(new_row, latent_vec, grid_coords, grid_shape, split=split,
-                                                                 allow_extrapolation=self.args['dataset'].get('extrapolate_beyond_range', False))
-                            pred_imgs = self._extract_modality_images(volume_inf)
-                            self.reconstruction_cache[cache_key] = pred_imgs
-                        except Exception:
-                            continue
+                    pred_imgs = self._cached_reconstruction(
+                        new_row, sub_id, w, self.latents[split][sub_id:sub_id + 1],
+                        grid_coords, grid_shape, split)
+                    if pred_imgs is None:
+                        continue
                     
                     pred_faf = pred_imgs[modalities[0]]
                     pred_seg = pred_imgs[modalities[1]] if len(modalities) > 1 else None
@@ -1439,19 +1418,11 @@ class ModelBuilder:
                 
                 for w in pred_weeks_ext:
                     new_row = self._get_interpolated_row_dict(actual_rows, w)
-                    # Check cache first to avoid redundant reconstructions
-                    cache_key = (split, sub_id, round(float(w), 3))
-                    if cache_key in self.reconstruction_cache:
-                        pred_imgs = self.reconstruction_cache[cache_key]
-                    else:
-                        latent_vec = self.latents[split][sub_id:sub_id+1]
-                        try:
-                            volume_inf = self._reconstruct_visit(new_row, latent_vec, grid_coords, grid_shape, split=split,
-                                                                 allow_extrapolation=self.args['dataset'].get('extrapolate_beyond_range', False))
-                            pred_imgs = self._extract_modality_images(volume_inf)
-                            self.reconstruction_cache[cache_key] = pred_imgs
-                        except Exception:
-                            continue
+                    pred_imgs = self._cached_reconstruction(
+                        new_row, sub_id, w, self.latents[split][sub_id:sub_id + 1],
+                        grid_coords, grid_shape, split)
+                    if pred_imgs is None:
+                        continue
                     
                     pred_faf = pred_imgs[modalities[0]]
                     pred_seg = pred_imgs[modalities[1]] if len(modalities) > 1 else None
@@ -1490,18 +1461,6 @@ class ModelBuilder:
                 _kind = 'interp' if _v['status'] == 'interpolated' else 'extrap'
                 _newvisit_rows.append({'Patient_Eye': eye_id, 'Weeks': float(_v['week']),
                                        'Pred_Area_mm2': _v['pred_area'], 'Kind': _kind})
-                # new-visit FAF/mask image dump (no GT): pred only, gt arrays zeroed
-                if _nv_dump is not None and _v.get('pred_seg') is not None:
-                    _dio, _root, _meth, _scen = _nv_dump
-                    _pf = np.asarray(_v['pred_faf'], dtype=np.float32)
-                    _pm = (np.asarray(_v['pred_seg']) > 0.5).astype(np.uint8)
-                    _dio.write_case(_root, method=_meth, scenario=_scen, eye_id=eye_id,
-                                    tgt_visit=f"{_kind[:3]}{_v['week']:.1f}",
-                                    pred_faf=_pf, gt_faf=np.zeros_like(_pf),
-                                    pred_mask=_pm, gt_mask=np.zeros_like(_pm),
-                                    weeks=float(_v['week']), pred_area_mm2=_v['pred_area'],
-                                    is_extrap=(0 if _kind == 'interp' else 1),
-                                    mask_source='gap_inr_seg_head')
 
             combined_visits = actual_visits + interpolated_visits + extrapolated_visits
             combined_visits.sort(key=lambda x: (x['week'], x['status'] != 'actual'))
@@ -1510,13 +1469,13 @@ class ModelBuilder:
             if K == 0:
                 continue
 
-            # Color-code each column by status so existing / hold-out / interpolated /
+            # Colour-code each column by status so existing / hold-out / interpolated /
             # extrapolated visits are instantly distinguishable.
             status_color = {
-                'actual': color,            # split color (orange=train, blue=val)
-                'holdout': '#c8951a',       # gold — held-out visit (darkened for white background)
-                'interpolated': '#26A69A',  # teal — interpolated (between existing visits)
-                'extrapolated': '#AB47BC',  # purple — extrapolated (future)
+                'actual': color,            # split colour (orange=train, blue=val)
+                'holdout': '#c8951a',       # gold, held-out visit (darkened for white background)
+                'interpolated': '#26A69A',  # teal, interpolated (between existing visits)
+                'extrapolated': '#AB47BC',  # purple, extrapolated (future)
             }
             status_style = {'actual': 'solid', 'holdout': 'solid',
                             'interpolated': 'solid', 'extrapolated': 'dashed'}
@@ -1669,7 +1628,7 @@ class ModelBuilder:
                               split='val', support_k=None, pair_source=None, pair_target=None):
         """
         Run a single test-time-optimisation round on `split` ('val' or 'test'): re-init latents,
-        optimize on non-held-out visits, evaluate on both optimization and held-out visits.
+        optimise on non-held-out visits, evaluate on both optimisation and held-out visits.
 
         Args:
             holdout_position: 1-indexed visit to hold out (None = last).
@@ -1681,7 +1640,7 @@ class ModelBuilder:
             Mean DICE over the held-out (eval) visits for this round, or None if there are no
             held-out visits / no segmentation. Used by validate() to pick the best checkpoint.
         """
-        # Re-initialize latents from scratch
+        # Re-initialise latents from scratch
         self._init_validation(split=split)
 
         # Frozen test-time latents (reproducibility)
@@ -1702,7 +1661,7 @@ class ModelBuilder:
             _loaded_frozen = True
             print(f"[{split} {tag_suffix}] Loaded FROZEN latents -> skipping TTO (deterministic re-eval).")
 
-        # Split visits into optimization and evaluation sets. On the test set, a patient-eye with
+        # Split visits into optimisation and evaluation sets. On the test set, a patient-eye with
         # a single visit is optimised on (clinical case) rather than held out for evaluation.
         single_visit_to = 'opt' if split == 'test' else 'eval'
         opt_idcs, eval_idcs = self.datasets[split].get_longitudinal_indices(
@@ -1788,7 +1747,7 @@ class ModelBuilder:
             log_loss(last_val_loss_components, epoch_train, split=f'{split}_opt_{tag_suffix}', log=self.args['logging'], tb_writer=tb_writer)
 
         # Clear the reconstruction cache before final evaluation of this round,
-        # so that evaluations and novel visit figures use the newly optimized latents.
+        # so that evaluations and novel visit figures use the newly optimised latents.
         self.reconstruction_cache = {}
 
         # 2. Evaluate on optimisation visits
@@ -1801,10 +1760,6 @@ class ModelBuilder:
             self._eval_sets[f'{split}_opt'] = opt_data
         log_metrics(self.args, metrics_opt, epoch_train, split=f'{split}_opt_{tag_suffix}', tb_writer=tb_writer)
         self._log_reconstruction_figures(opt_data, split, epoch_train, tb_writer, tensorboard_tag=f'{split}_opt_{tag_suffix}')
-        # Static-segmentation dump: every OBSERVED visit (opt_data) for the Part-2 comparison vs
-        # NISF/MetaSeg. No-op unless args['comparison_dump_static']['enable'] (evaluate.py --dump_static_root).
-        self._maybe_dump_static(opt_data, split)
-
         # 3. Evaluate on held-out visits
         eval_data = None
         eval_dice = None
@@ -1820,11 +1775,7 @@ class ModelBuilder:
                 self._eval_sets[f'{split}_eval'] = eval_data
             log_metrics(self.args, metrics_eval, epoch_train, split=f'{split}_eval_{tag_suffix}', tb_writer=tb_writer)
             self._log_reconstruction_figures(eval_data, split, epoch_train, tb_writer, tensorboard_tag=f'{split}_eval_{tag_suffix}')
-            # Cross-model comparison dump (held-out target visit only). No-op unless
-            # args['comparison_dump']['enable'] is set (by evaluate.py --dump_root).
-            self._maybe_dump_comparison(eval_data, split)
-
-            # Held-out reconstruction loss (generalization): computed with the optimized,
+            # Held-out reconstruction loss (generalisation): computed with the optimised,
             # frozen latents, same seg_weight as the opt loss so the curves are comparable.
             eval_loss = self._compute_loss_on_visits(eval_idcs, split=split)
             if eval_loss is not None:
@@ -1851,115 +1802,13 @@ class ModelBuilder:
 
 
 
-    def _maybe_dump_comparison(self, eval_data, split):
-        """Write one cross-model comparison .npz per held-out eye (target = its latest held-out
-        visit) to the shared dump tree consumed by models/comparison/make_comparison_figure.py.
 
-        No-op unless args['comparison_dump']['enable'] is True and split matches. The scenario +
-        method key are set by the caller (evaluate.py): scenario='full'/method='gap_inr' for the
-        all-(n-1)-visits LOO-last run, scenario='matched'/method='gap_inr_k1' for the --support_k 1
-        (baseline-only) run. Arrays come straight from the reconstruction record GAP-INR already
-        built (pred/gt FAF + seg on its sampling grid; faf_ga_512 => native 512, comparable to the
-        ImageFlowNet-family dumps). DICE/PSNR/SSIM/areas are reused; HD is computed here."""
-        cd = self.args.get('comparison_dump') or {}
-        if not cd.get('enable') or not eval_data or split != cd.get('split', 'test'):
-            return
-        try:
-            import sys as _sys
-            _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'comparison'))
-            import dump_io
-            from skimage.metrics import hausdorff_distance
-        except Exception as e:
-            print(f"[comparison_dump] skipped (import failed): {e}")
-            return
-        root = cd['root']
-        scenario = cd.get('scenario', 'full')
-        method = cd.get('method', 'gap_inr')
-        n = 0
-        for sub_id, data in eval_data.items():
-            recs = data.get('reconstructions', {})
-            if not recs:
-                continue
-            eye_id = str(data.get('eye_id', sub_id))
-            latest = max(recs.keys(), key=lambda k: recs[k].get('weeks', 0.0) or 0.0)
-            # 'interp' -> dump EVERY held-out visit, keyed by its own visit index (interior visits for
-            # the interpolation comparison + trajectory figure; keying by visit avoids the 'last'
-            # collision when leave_one_out holds out each visit in a separate round). Extrapolation
-            # scenarios -> single target = the latest held-out visit (== the eye's last visit).
-            vks = list(recs.keys()) if scenario == 'interp' else [latest]
-            for vk in vks:
-                r = recs[vk]
-                if r.get('pred_faf') is None or r.get('pred_seg') is None or r.get('gt_seg') is None:
-                    continue
-                pm = (np.asarray(r['pred_seg']) > 0.5).astype(np.uint8)
-                gm = (np.asarray(r['gt_seg']) > 0.5).astype(np.uint8)
-                if pm.sum() == 0 and gm.sum() == 0:
-                    hd = 0.0
-                elif pm.sum() == 0 or gm.sum() == 0:
-                    hd = float(np.hypot(*pm.shape))
-                else:
-                    hd = float(hausdorff_distance(pm, gm))
-                tgt = str(vk) if scenario == 'interp' else 'last'
-                dump_io.write_case(
-                    root, method=method, scenario=scenario, eye_id=eye_id, tgt_visit=tgt,
-                    pred_faf=r['pred_faf'], gt_faf=r['gt_faf'], pred_mask=pm, gt_mask=gm,
-                    src_visit=None, weeks=r.get('weeks'), dice=r.get('dice'), hd=hd,
-                    psnr=r.get('psnr'), ssim=r.get('ssim'),
-                    gt_area_mm2=r.get('gt_area'), pred_area_mm2=r.get('pred_area'),
-                    is_extrap=(0 if (scenario == 'interp' and vk != latest) else 1),
-                    mask_source='gap_inr_seg_head')
-                n += 1
-        print(f"[comparison_dump] wrote {n} GAP-INR case(s) -> {os.path.join(root, scenario, method)}")
-
-    def _maybe_dump_static(self, opt_data, split):
-        """Static-segmentation dump (Part 2): one case per OBSERVED visit, keyed by Visit_Number, so
-        GAP-INR can be compared to the static baselines (NISF/MetaSeg) on the segmentation-of-a-seen-
-        visit task. method='gap_inr_pervisit' (independent_visits) or 'gap_inr_perpatient' (one latent
-        per eye) -- set by evaluate.py. No-op unless args['comparison_dump_static']['enable']."""
-        cd = self.args.get('comparison_dump_static') or {}
-        if not cd.get('enable') or not opt_data or split != cd.get('split', 'test'):
-            return
-        try:
-            import sys as _sys
-            _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'comparison'))
-            import dump_io
-            from skimage.metrics import hausdorff_distance
-        except Exception as e:
-            print(f"[comparison_dump_static] skipped (import failed): {e}")
-            return
-        root, method = cd['root'], cd.get('method', 'gap_inr_pervisit')
-        n = 0
-        for sub_id, data in opt_data.items():
-            eye_id = str(data.get('eye_id', sub_id))
-            for _vk, r in (data.get('reconstructions', {}) or {}).items():
-                if r.get('pred_faf') is None or r.get('pred_seg') is None or r.get('gt_seg') is None:
-                    continue
-                vis = r.get('visit')
-                if vis is None:
-                    continue
-                pm = (np.asarray(r['pred_seg']) > 0.5).astype(np.uint8)
-                gm = (np.asarray(r['gt_seg']) > 0.5).astype(np.uint8)
-                if pm.sum() == 0 and gm.sum() == 0:
-                    hd = 0.0
-                elif pm.sum() == 0 or gm.sum() == 0:
-                    hd = float(np.hypot(*pm.shape))
-                else:
-                    hd = float(hausdorff_distance(pm, gm))
-                dump_io.write_case(
-                    root, method=method, scenario='static', eye_id=eye_id, tgt_visit=str(vis),
-                    pred_faf=r['pred_faf'], gt_faf=r['gt_faf'], pred_mask=pm, gt_mask=gm,
-                    weeks=r.get('weeks'), dice=r.get('dice'), hd=hd, psnr=r.get('psnr'),
-                    ssim=r.get('ssim'), gt_area_mm2=r.get('gt_area'), pred_area_mm2=r.get('pred_area'),
-                    mask_source='gap_inr_seg_head')
-                n += 1
-        print(f"[comparison_dump_static] wrote {n} GAP-INR observed-visit case(s) -> "
-              f"{os.path.join(root, 'static', method)}")
 
     def _compute_loss_on_visits(self, visit_idcs, split='val'):
         """Average reconstruction/segmentation loss over the given visits using the CURRENT
-        (optimized, frozen) latents. No gradients. Used to log a held-out validation loss.
+        (optimised, frozen) latents. No gradients. Used to log a held-out validation loss.
 
-        Uses the same seg_weight policy as the optimization loss (seg off during val unless
+        Uses the same seg_weight policy as the optimisation loss (seg off during val unless
         seg_loss_val), so val_eval_* and val_opt_* loss curves are directly comparable.
         Returns an averaged loss-components dict {total, sr, seg, trafo} or None.
         """
@@ -2072,7 +1921,7 @@ class ModelBuilder:
 
                 # Lesion sizes in mm^2 = (#GA pixels on the sampling grid) * ScaleXSlo * ScaleYSlo * rf.
                 # ScaleXSlo/ScaleYSlo are mm/px at NATIVE resolution. faf_ga_620 samples the native-pitch
-                # 620 grid (sampling_bbox=[620,620], spacing 1.0) -> rf=1. faf_ga_512 center-crops 620
+                # 620 grid (sampling_bbox=[620,620], spacing 1.0) -> rf=1. faf_ga_512 centre-crops 620
                 # (native pitch, no GA clip) then DOWNSAMPLES to 512, so each grid pixel covers
                 # (620/512)^2 more physical area -> rf=(crop/world)^2 restores the true mm^2.
                 px_area = self._lesion_px_area_mm2(df_row_dict)
@@ -2081,7 +1930,7 @@ class ModelBuilder:
 
                 # Carry the per-visit GA area on the metrics dict (single-element lists, matching the
                 # other metric values) so it is written into the per-hold-out-position JSON. This lets
-                # summarize_eval bucket area-MAE into interpolation/extrapolation exactly like DICE --
+                # summarise_eval bucket area-MAE into interpolation/extrapolation exactly like DICE --
                 # the pooled lesion CSV only survives the LAST leave-one-out round, so it cannot.
                 res_metrics['GT_Area_mm2'] = [gt_area if gt_area is not None else float('nan')]
                 res_metrics['Pred_Area_mm2'] = [pred_area if pred_area is not None else float('nan')]
@@ -2098,27 +1947,9 @@ class ModelBuilder:
                 v_hd = _first(res_metrics.get('HD'))
                 v_lpips = _first(res_metrics.get('LPIPS'))
 
-                # Standardized cross-method monitor panel logged to TB per held-out eye.
-                if tb_writer is not None and pred_seg is not None and len(modalities) > 0:
-                    try:
-                        import sys as _sys, os as _os
-                        _comp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                                              "comparison")
-                        if _comp not in _sys.path:
-                            _sys.path.insert(0, _comp)
-                        import monitor_panel
-                        _fp = res_imgs[modalities[0]].get('pred')
-                        _fg = res_imgs[modalities[0]].get('ref')
-                        if _fp is not None and _fg is not None:
-                            monitor_panel.log_panel(
-                                tb_writer, f"{split}/monitor/{eye_id}/{visit_label}", epoch,
-                                _fg, _fp, gt_seg, pred_seg, title=f"GAP-INR {eye_id} {visit_label}",
-                                psnr=v_psnr, ssim=v_ssim, dice=v_dice, mask_note="real GT")
-                    except Exception as _e:
-                        print(f"[monitor_panel] GAP-INR skip: {_e}")
 
                 # For each modality, appends this visit's predicted image, GT image, intra-visit diff map,
-                # and the scalar metrics/areas to running lists — building up a timeline per modality per patient-eye
+                # and the scalar metrics/areas to running lists, building up a timeline per modality per patient-eye
                 # (used later to render side-by-side/tiled longitudinal comparison figures across all visits of an eye).
 
                 for mod, imgs in res_imgs.items():
@@ -2179,6 +2010,27 @@ class ModelBuilder:
                              tb_writer=None, baseline_volume=baseline_inf)
 
         return metrics, subject_data # we return a list of per-visit scalar-metric dicts (for building an evaluation table/CSV), and a nester per-patient-eye per-modality collections of images/diff maps/metrics/areas, structured for building longitudinal tiled comparison figures
+
+    def _cached_reconstruction(self, row_dict, cache_id, week, latent_sel,
+                               grid_coords, grid_shape, split):
+        """Reconstruct one visit's per-modality images, reusing self.reconstruction_cache.
+
+        Returns None when the reconstruction fails, so a caller looping over time points can
+        skip that one. `latent_sel` is either a latent tensor or an integer index into
+        self.latents[split], both of which _reconstruct_visit accepts."""
+        key = (split, cache_id, round(float(week), 3))
+        if key in self.reconstruction_cache:
+            return self.reconstruction_cache[key]
+        try:
+            volume_inf = self._reconstruct_visit(
+                row_dict, latent_sel, grid_coords, grid_shape, split=split,
+                allow_extrapolation=self.args['dataset'].get('extrapolate_beyond_range', False))
+        except Exception as e:
+            print(f"Warning: could not reconstruct the visit at week {week}: {e}")
+            return None
+        imgs = self._extract_modality_images(volume_inf)
+        self.reconstruction_cache[key] = imgs
+        return imgs
 
     def _reconstruct_visit(self, row_dict, sub_id_int, grid_coords, grid_shape, split='train', step_size=None,
                            allow_extrapolation=False):
@@ -2322,12 +2174,6 @@ class ModelBuilder:
             img_dict[mod] = pred_data
         return img_dict
 
-    def _compute_diff_map(self, mod_name, current, baseline):
-        is_seg = 'seg' in mod_name.lower() or 'mask' in mod_name.lower()
-        if is_seg:
-            return _seg_change_map(current, baseline)
-        else:
-            return _signed_diff_map(current, baseline)
 
     def _log_inner_val_convergence(self, epoch_train, epoch_val, picked_subs, opt_idcs, eval_idcs, grid_coords, grid_shape, split='val', tag_suffix=''):
         """Logs quantitative metrics averaged across the whole `split` set, and convergence images for picked subjects.
@@ -2430,12 +2276,12 @@ class ModelBuilder:
         return float(np.mean(opt_dice_vals)) if opt_dice_vals else None
 
     def _row_weeks(self, d):
-        """Weeks-from-baseline for a row dict — the canonical interpolation axis for novel visits.
+        """Weeks-from-baseline for a row dict, the canonical interpolation axis for novel visits.
 
         IMPORTANT: novel-visit targets (`w`) are always expressed in WEEKS (midpoints / future
         offsets). The interpolation axis must therefore be weeks_from_baseline, NOT the
         temporal_condition (which may be AgeatVisit, in years). Using the wrong axis was bracketing
-        week targets against age values, and clobbering AgeatVisit with week numbers — feeding wildly
+        week targets against age values, and clobbering AgeatVisit with week numbers, feeding wildly
         out-of-distribution values to load_time and breaking interpolation/extrapolation.
 
         Prefers the derived 'weeks_from_baseline' column; falls back to visit_week_map[Visit_Number],
@@ -2497,7 +2343,7 @@ class ModelBuilder:
 
         # Linearly inter/extrapolate ALL numeric columns by `factor`. Because age and
         # weeks_from_baseline both advance linearly with time, this yields the correct AgeatVisit
-        # (in years) AND weeks_from_baseline at the target — each in its own units.
+        # (in years) AND weeks_from_baseline at the target, each in its own units.
         for key in r0.keys():
             if (key in r0 and key in r1 and
                 isinstance(r0[key], (int, float, np.integer, np.floating)) and
@@ -2509,7 +2355,7 @@ class ModelBuilder:
                 new_row[key] = v0 + factor * (v1 - v0)
 
         # Pin the canonical time axis to the exact target week. Do NOT clobber the temporal_key
-        # (e.g. AgeatVisit) with `w` — its correct value comes from the interpolation above; the old
+        # (e.g. AgeatVisit) with `w`, its correct value comes from the interpolation above; the old
         # `new_row[temporal_key] = w` is what fed week numbers into the AgeatVisit time input.
         new_row['weeks_from_baseline'] = w
         if self._temporal_key == 'weeks_from_baseline':
@@ -2561,7 +2407,7 @@ class ModelBuilder:
 
             sorted_sub_df = sub_df.sort_values(self._temporal_key)  # sort the visits by the temporal condition column
             eye_id = str(sorted_sub_df.iloc[0].get(id_col, 'unknown'))  # extract Eye_ID
-            patient_stats = self._get_patient_stats(split, sub_id)  # get patient stats for normalization
+            patient_stats = self._get_patient_stats(split, sub_id)  # get patient stats for normalisation
 
             # 1. Load actual GT visits and images
             gt_visits = []
@@ -2584,7 +2430,7 @@ class ModelBuilder:
                     gt_imgs[mod] = img
 
                 # Keep row_dict's real values (AgeatVisit in years, weeks_from_baseline in weeks).
-                # Do NOT overwrite the temporal_key with `week` — that corrupted the AgeatVisit time
+                # Do NOT overwrite the temporal_key with `week`, that corrupted the AgeatVisit time
                 # input during novel-visit reconstruction. The plotting 'week' is tracked separately.
                 gt_visits.append({
                     'week': week,
@@ -2617,28 +2463,16 @@ class ModelBuilder:
                 # Interpolate/extrapolate the row dictionary inputssub_id
                 new_row = self._get_interpolated_row_dict(actual_rows, w)
                 
-                # Check cache first to avoid redundant reconstructions
-                cache_key = (split, sub_id, round(float(w), 3))
-                if cache_key in self.reconstruction_cache:
-                    pred_imgs = self.reconstruction_cache[cache_key]
-                else:
-                    # Reconstruct predicted visit
-                    latent_idx = sub_id
-                    if self.args['dataset'].get('independent_visits', False):
-                        # Fallback to the first visit index for this patient-eye
-                        sub_rows = df[df['sub_id_int'] == sub_id]
-                        if not sub_rows.empty:
-                            latent_idx = df.index.get_loc(sub_rows.index[0])
-                    try:
-                        volume_inf = self._reconstruct_visit(
-                            new_row, latent_idx, grid_coords, grid_shape, split=split,
-                            allow_extrapolation=self.args['dataset'].get('extrapolate_beyond_range', False)
-                        )
-                        pred_imgs = self._extract_modality_images(volume_inf)
-                        self.reconstruction_cache[cache_key] = pred_imgs
-                    except Exception as e:
-                        print(f"Warning: Failed to reconstruct novel visit for {eye_id} at week {w}: {e}")
-                        continue
+                # With one latent per visit, index the eye's FIRST visit rather than the eye.
+                latent_idx = sub_id
+                if self.args['dataset'].get('independent_visits', False):
+                    sub_rows = df[df['sub_id_int'] == sub_id]
+                    if not sub_rows.empty:
+                        latent_idx = df.index.get_loc(sub_rows.index[0])
+                pred_imgs = self._cached_reconstruction(new_row, sub_id, w, latent_idx,
+                                                        grid_coords, grid_shape, split)
+                if pred_imgs is None:
+                    continue
                 
                 pred_visits.append({
                     'week': w,
@@ -2690,7 +2524,7 @@ class ModelBuilder:
 
                 # For the segmentation modality, caption each column with the lesion size measured
                 # from that column's mask (predicted mask for Pred/novel columns, GT mask for GT
-                # columns) — never an interpolated/artificial size. mm^2 = (#GA px > 0.5) * px_area.
+                # columns), never an interpolated/artificial size. mm^2 = (#GA px > 0.5) * px_area.
                 sublabels = None
                 if has_seg and mod == seg_key:
                     sublabels = []
@@ -2717,101 +2551,7 @@ class ModelBuilder:
 
 
 
-    def generate_renders(self, epoch=0, n_max=100):
-        """
-        Generate a render for each condition combination in self.args['model_gen']['conditions'].
-        """
-        print(f"Generating renders (depending on resolution and count this may take some time) ...\n")
-        self.inr_decoder['train'].eval()
-        grid_coords, grid_shape = generate_world_grid(self.args, device=self.device)
-        temp_steps = self.args['model_gen']['temporal_values']
-        sr_dims = sum(self.args['inr_decoder']['out_dim'][:-1])
-        n_seg_channels = self.args['inr_decoder']['out_dim'][-1]
-        has_seg = n_seg_channels > 0
-        # Rendering expects num_modalities channels = [intensity..., seg_argmax]
-        # But inference() now returns [imgs(sr_dims), seg_hard(1), seg_soft(n_seg_channels)]
-        # We need to extract [imgs, seg_hard] = sr_dims + 1 channels
-        render_list = []
-        with torch.no_grad():
-            temporal_key = self._temporal_key
-            for temp_step in temp_steps:
-                temp_step_normed = normalize_condition(self.args, temporal_key, temp_step)
-                mean_latent = self.get_mean_latent(temporal_key, temp_step_normed, n_max=n_max)
-                condition_vectors = generate_combinations(self.args, self.args['model_gen']['conditions'])
-                cond_list = []
-                for c_v in condition_vectors:
-                    time_as_input = self.args['inr_decoder'].get('time_as_input', False)
-                    if time_as_input:
-                        keys = list(self.args['model_gen']['conditions'].keys())
-                        if temporal_key in keys:
-                            temp_idx = keys.index(temporal_key)
-                            t_val = c_v[temp_idx]
-                            c_v_filtered = [val for idx, val in enumerate(c_v) if idx != temp_idx]
-                        else:
-                            t_val = temp_step_normed
-                            c_v_filtered = c_v
-                        
-                        c_v_tensor = torch.tensor(c_v_filtered, dtype=torch.float32).to(self.device)
-                        t_val_tensor = torch.tensor([t_val], dtype=torch.float32).to(self.device)
-                    else:
-                        c_v_tensor = torch.tensor(c_v, dtype=torch.float32).to(self.device)
-                        t_val_tensor = None
-                    
-                    values_p = self.inr_decoder['train'].inference(grid_coords, mean_latent, c_v_tensor,
-                                                                   grid_shape, None, time_val=t_val_tensor)
-                    # Extract only [imgs, seg_hard] for rendering (discard seg_soft channels)
-                    if has_seg:
-                        imgs = values_p[..., :sr_dims]
-                        seg_hard = values_p[..., sr_dims:sr_dims + 1]  # argmax channel
-                        values_p = torch.cat((imgs, seg_hard), dim=-1)
-                    else:
-                        values_p = values_p[..., :sr_dims]
-                    cond_list.append(values_p.detach().cpu())
-                    torch.cuda.empty_cache()
 
-                render_list.append(torch.stack(cond_list, dim=-1))
-        render_list = torch.stack(render_list, dim=-1)  # [*spatial, num_modalities, num_conditions, t]
-        save_renders(self.args, render_list, temp_steps, condition_vectors, epoch=epoch,
-                   tb_writer=self.args.get('tb_writer', None))
-        return render_list
-
-    def get_mean_latent(self, condition_key, condition_mean, n_max=100, split='train'):
-        """
-        Regress gaussian weighted latent code from subjects weighted by distance to condition mean
-        of the condition with condition_key. Weights are clipped to the closest n_max subjects.
-        sigma is the standard deviation of the gaussian distribution used to weight the latents
-        emperically we want +/- 2 stds (covering 95% of the weights) to span +/- "gaussian_span" weeks of scan age, e.g. 0.75 weeks.
-        Therefore:
-        - Full range of condition values is [-1, 1], i.e. 2.
-        - Full range of scan age is c_max - c_min = c_range, e.g. 46 - 37 = 9 for term neonates.
-        - The ratio of condition values to weeks is 2 / c_range = c_ratio, e.g. 2 / 9 = 0.222 units per week.
-        ==> 2 std = 0.75 weeks = 0.75 * c_ratio e.g. = 0.165 units.
-        ==> sigma = 1 std = 0.5 * 0.75 weeks * c_ratio, e.g. = 0.0825 units for term neonates.
-        # Finally, we scale the sigma by the condition scale factor in the config, as scan age is actually normalized to [-cond_scale, cond_scale]
-        """
-        c_ratio = 2 / (self.args['dataset']['constraints'][condition_key]['max'] -
-                       self.args['dataset']['constraints'][condition_key]['min'])
-        span_weeks = self.args['model_gen']['gaussian_span']
-        sigma = 0.5 * span_weeks * c_ratio
-        sigma = sigma * self.args['model_gen']['cond_scale']
-
-        latents = self.latents[split]
-        # Expand latents to visit-level: each visit gets its patient-eye's latent
-        sub_id_map = self.datasets[split].sub_id_map
-        expanded_latents = latents[sub_id_map]  # (N_visits, ...)
-        condition_values, df_idcs = self.datasets[split].get_condition_values(condition_key, normed=True,
-                                                                              device=self.device)
-        assert len(condition_values) == len(expanded_latents), f"Condition values ({len(condition_values)}) \
-                                                        and expanded latents ({len(expanded_latents)}) must have the same length!"
-        weights = torch.exp(-(condition_values - condition_mean) ** 2 / (2 * (sigma ** 2)))
-        n_max = min(n_max, len(weights))
-        weights[torch.argsort(weights, descending=True)[n_max:]] = 0
-        weights = weights / torch.sum(weights)
-        # Dynamically reshape weights to match latents dimensionality
-        view_shape = [-1] + [1] * (expanded_latents.ndim - 1)
-        weights = weights.view(*view_shape)
-        mean_latent = torch.sum(expanded_latents * weights, dim=0, keepdim=True)
-        return mean_latent
 
     def save_state(self, epoch, split='train', filename=None):
         """Save a checkpoint. By default writes 'checkpoint_epoch_{epoch}.pth'; pass `filename`
@@ -2863,7 +2603,7 @@ class ModelBuilder:
             self._init_inr(split='train')
             # self._init_transformations(split='train')
             self._init_latents(split='train')
-        self._init_optimizer(split='train')  # optimizer is not loaded from checkpoint
+        self._init_optimizer(split='train')  # optimiser is not loaded from checkpoint
         if self.args.get('overfit', False):
             print("--- OVERFIT MODE: Reusing training subjects for validation ---")
             self._init_dataloading(df_loaded=self.datasets['train'].df, split='val')
@@ -2886,7 +2626,7 @@ class ModelBuilder:
             self._init_val_latents_from_population_mean(split=split)
 
         # Snapshot the initialisation as the anchor for the TTA latent regulariser:
-        # random -> pull toward 0 (anchor None); population_mean / nearest_train -> pull toward
+        # random -> pull towards 0 (anchor None); population_mean / nearest_train -> pull towards
         # that prior (the just-initialised latent values).
         if init_mode == 'random':
             self._latent_anchor[split] = None
@@ -2901,7 +2641,7 @@ class ModelBuilder:
         if tb_writer is not None:
             self.args['tb_writer'] = tb_writer
         self.inr_decoder[split].eval()
-        # Freeze INR decoder weights — only latents should be optimised at test time.
+        # Freeze INR decoder weights, only latents should be optimised at test time.
         for p in self.inr_decoder[split].parameters():
             p.requires_grad_(False)
 
@@ -2962,7 +2702,6 @@ class ModelBuilder:
         shape = (n_subjects, *self.args['inr_decoder']['latent_dim'])  # (N, C, X_1, X_2)
         lats = torch.normal(0, 0.01, size=shape).to(self.device) if lats is None else lats.to(self.device)
         self.latents[split] = nn.Parameter(lats)
-        # if split == 'val' and self.args['inr_decoder']['cond_dims'] > 0:
         #    shape_cond_val = (n_subjects, self.args['inr_decoder']['cond_dims'])
         #    self.conditions_val = nn.Parameter(torch.normal(0, 0.01, size=shape_cond_val).to(self.device))
 
@@ -3082,8 +2821,8 @@ class ModelBuilder:
 
         With time_as_input=false, the temporal condition (e.g. weeks_from_baseline) enters ONLY
         through the conditioning pathway (cond_encoding -> FiLM modulation). This probe fixes a
-        single subject's (fitted) latent and sweeps the temporal condition across — and slightly
-        beyond — its training range, measuring how much the predicted FAF and the predicted GA
+        single subject's (fitted) latent and sweeps the temporal condition across, and slightly
+        beyond, its training range, measuring how much the predicted FAF and the predicted GA
         area change with time. A flat response means the model is ignoring time; a smooth,
         monotone GA-area trajectory is what we want for interpolation/extrapolation.
 
@@ -3189,8 +2928,8 @@ class ModelBuilder:
         # if self.args['inr_decoder']['tf_dim'] > 0:
         #    params.append({'name': f'transformations_{split}',
         #                   'params': self.transformations[split],
-        #                   'lr': self.args['optimizer']['lr_tf'],
-        #                   'weight_decay': self.args['optimizer']['tf_weight_decay']})
+        #                   'lr': self.args['optimiser']['lr_tf'],
+        #                   'weight_decay': self.args['optimiser']['tf_weight_decay']})
         if split == 'train':
             # Collect parameters. Note: inr_decoder.parameters() already includes
             # sr_net, modulator, and hashgrid (if active).
@@ -3198,11 +2937,10 @@ class ModelBuilder:
                            'params': self.inr_decoder[split].parameters(),
                            'lr': self.args['optimizer']['lr_inr'],
                            'weight_decay': self.args['optimizer']['inr_weight_decay']})
-        # if split == 'val' and self.args['inr_decoder']['cond_dims'] > 0:
         #    params.append({'name': f'conditions_val',
         #                   'params': self.conditions_val,
-        #                   'lr': self.args['optimizer']['lr_latent'],
-        #                   'weight_decay': self.args['optimizer']['latent_weight_decay']})
+        #                   'lr': self.args['optimiser']['lr_latent'],
+        #                   'weight_decay': self.args['optimiser']['latent_weight_decay']})
         self.optimizers[split] = optim.AdamW(params)
         self.grad_scalers[split] = GradScaler() if self.args['amp'] else None
         if self.args['optimizer']['scheduler']['type'] == 'cosine':

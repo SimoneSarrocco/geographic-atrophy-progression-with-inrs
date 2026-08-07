@@ -49,7 +49,7 @@ RF = (CROP_SIZE / EVAL) ** 2               # mm^2 area pitch: 512-grid -> native
 
 def _load_mask(path):
     """GA mask on the SAME grid as GAP-INR/the spec: center-crop 620 (native), resize 512 NEAREST,
-    binarise > 127. Identical to summarize_eval._load_mask_512 and the IFN mask loader geometry."""
+    binarise > 127. Identical to summarise_eval._load_mask_512 and the IFN mask loader geometry."""
     m = Image.open(path).convert("L")
     W, H = m.size
     l, t = (W - CROP_SIZE) // 2, (H - CROP_SIZE) // 2

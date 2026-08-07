@@ -64,7 +64,7 @@ python eval_faf_ga.py --model I2SBUNet        --target-dim '(256,256)' --diffusi
 
 Each evaluation writes `leave_one_out_summary_test_<best_type>.csv` into the run directory
 (`..._seg_dice.csv` with the default `--best-type`), in the same format as
-GAP-INR's [`summarize_eval.py`](../../summarize_eval.py), so the comparison table reads identical
+GAP-INR's [`summarise_eval.py`](../../summarise_eval.py), so the comparison table reads identical
 fields across every method: DICE, PSNR, SSIM, LPIPS, Hausdorff distance and lesion-area MAE, split into
 interpolation and extrapolation. A copy-forward reference (predict the source or last available GT visit unchanged) is
 scored alongside, as the floor any model has to beat.

@@ -8,7 +8,7 @@ correct protocol the user chose:
     DICE = dice(segmentor(predicted_FAF), REAL GA mask)          [shared frozen segmentor]
 
 computed for every forecasting pair on the TEST split, under TWO stratifications:
-  (1) by visit position (GAP-INR framing, matching summarize_eval):
+  (1) by visit position (GAP-INR framing, matching summarise_eval):
     * INTERPOLATION  -- the predicted (target) visit is NOT the eye's last visit
     * EXTRAPOLATION  -- the predicted (target) visit IS the eye's last visit
   (2) by GA-growth magnitude (ImageFlowNet Table 1 framing), from the GT masks only:

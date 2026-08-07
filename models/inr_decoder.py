@@ -23,7 +23,7 @@ class INR_Decoder(nn.Module):
         self.modulator = Modulator(args_inr['latent_dim'], kernel_size=args_inr['cnn_kernel_size'])
         self.arch = args_inr.get('architecture', 'siren')
 
-        # Initialize Coordinate Encoding
+        # Initialise Coordinate Encoding
         self.encoding = get_encoding(args_inr, args.get('encoding'))
         siren_in_dim = self.encoding.out_dim
         # siren_in_dim = args_inr['in_dim']
@@ -33,7 +33,7 @@ class INR_Decoder(nn.Module):
         if self.time_as_input:
             # 'time_encoding' selects the time-input encoder: 'mlp' -> learned MLP embedding;
             # anything else falls through to the Fourier/raw logic driven by time_num_frequencies
-            # (so existing 'raw'+freq6 configs are unchanged; only 'mlp' is new behavior).
+            # (so existing 'raw'+freq6 configs are unchanged; only 'mlp' is new behaviour).
             self.time_encoding = TimeEncoding(
                 num_frequencies=args_inr.get('time_num_frequencies', 6),
                 kind=args_inr.get('time_encoding', 'fourier'),
@@ -44,7 +44,7 @@ class INR_Decoder(nn.Module):
             siren_in_dim += self.time_encoding.out_dim
             # siren_in_dim += 1
 
-        # Initialize Condition Encoding. 'cond_encoding' selects the encoder:
+        # Initialise Condition Encoding. 'cond_encoding' selects the encoder:
         #   'fourier' (default, num_frequencies bands), 'mlp' (learned smooth embedding), or 'raw'.
         cond_dims = args_inr.get('cond_dims', 0)
         cond_num_freqs = args_inr.get('cond_num_frequencies', 6)
@@ -109,7 +109,7 @@ class INR_Decoder(nn.Module):
             time_vals: (N, 1) or (N, C_time) temporal coordinate
             flips: boolean tensor indicating if spatial latent coordinates are horizontally flipped
         """
-        # Apply Coordinate Encoding (e.g. Fourier, HashGrid) — spatial only
+        # Apply Coordinate Encoding (e.g. Fourier, HashGrid), spatial only
         coords_enc = self.encoding(coords)
 
         # Compute the modulated latent grids for all subjects (small: N_subjects, C, *spatial).
@@ -159,7 +159,7 @@ class INR_Decoder(nn.Module):
         modulations[idcs_df] and grid_sampling per sample.
 
         Args:
-            coords:      (n_samples, dim) normalized to [-1, 1]
+            coords:      (n_samples, dim) normalised to [-1, 1]
             modulations: (N_subjects, C, H, W) for 2D or (N_subjects, C, D, H, W) for 3D
             idcs_df:     (n_samples,) subject index per coordinate
         Returns:
@@ -352,49 +352,6 @@ class INR_Decoder(nn.Module):
         return torch.einsum('nxy,ny->nx', R, coords) + t
 
     @staticmethod
-    def spatial_interpolation(coords, latents, condition_vecs=None):
-        """
-        Spatial interpolation of the latent vector.
-        Determines sampling dimensionality (2D or 3D) based on the latents tensor shape.
-        """
-        # latents: (N, C, H, W) or (N, C, D, H, W)
-        latent_spatial_dim = latents.ndim - 2
-        
-        if latent_spatial_dim == 2:
-            # Latent grid is 2D. Sample using the first 2 dimensions of coords.
-            # coords: (N, dim) -> (N, 1, 1, 2)
-            # sample_coords = coords[..., :2]
-            # grid_coords = sample_coords[:, None, None, :]
-            # sampled = F.grid_sample(latents, grid_coords, mode='bilinear', align_corners=True,
-            #                        padding_mode='border')
-            # latents_interp = sampled.squeeze(-1).squeeze(-1)
-            # If batch size was 1, squeeze() might have removed the batch dim. Ensure (N, C)
-            # if latents_interp.ndim == 1:
-            #    latents_interp = latents_interp.unsqueeze(0)
-            coords = coords[:, None, None, :]  # (N, 1, 1, 2)
-            latents = F.grid_sample(latents, coords, mode='bilinear', align_corners=True,
-                                    padding_mode='border').squeeze()
-
-        elif latent_spatial_dim == 3:
-            # Latent grid is 3D. Sample using the first 3 dimensions of coords.
-            # coords: (N, dim) -> (N, 1, 1, 1, 3)
-            # sample_coords = coords[..., :3]
-            coords = coords[:, None, None, None, :] # (N, 1, 1, 1, 3)
-            # grid_coords = sample_coords[:, None, None, None, :]
-            # sampled = F.grid_sample(latents, grid_coords, mode='bilinear', align_corners=True,
-            #                        padding_mode='border')
-            # latents_interp = sampled.squeeze(-1).squeeze(-1).squeeze(-1)
-            # if latents_interp.ndim == 1:
-            #    latents_interp = latents_interp.unsqueeze(0)
-            latents = F.grid_sample(latents, coords, mode='bilinear', align_corners=True,
-                                    padding_mode='border').squeeze()
-        else:
-            raise ValueError(f"Unsupported latent grid dimensionality: {latent_spatial_dim}D (latents shape: {latents.shape})")
-
-        if condition_vecs is not None:
-            # condition_vecs is (N, C)
-            latents = torch.concat((latents, condition_vecs), dim=-1)
-        return latents
     
 
     def mask_reconstruction(self, recs, seg):
@@ -416,7 +373,7 @@ class INR_Decoder(nn.Module):
         # get connected components
         labeled_mask, num_labels = label(mask)
 
-        # get majority label of center patch
+        # get majority label of centre patch
         if ndim == 2:
             center_label = labeled_mask[cp[0] - ps[0]:cp[0] + ps[0], cp[1] - ps[1]:cp[1] + ps[1]].flatten()
         elif ndim == 3:

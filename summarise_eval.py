@@ -1,15 +1,69 @@
-"""
-Summarise a GAP-INR evaluation directory into a paper-ready leave-one-out table.
+"""Turn one evaluation directory into the leave-one-out table reported in the paper.
 
-Reads the per-held-out-position metric JSONs written during validation/test
-(``*_holdout_V*/*.json`` and ``*_eval*/*.json``), and the lesion-area CSV, then
-reports per-position and cohort held-out performance with mean ± standard error,
-split into INTERPOLATION (a non-final visit held out) vs EXTRAPOLATION (the last
-visit held out), plus the lesion-area MAE.
+evaluate.py runs this at the end of every evaluation. Call it by hand only to
+re-summarise a directory that already exists. It reads files, so it needs no GPU
+and never touches the model.
 
-Usage:
-    python summarize_eval.py --eval_dir tmp/<run>/eval_test
-    # -> writes <eval_dir>/leave_one_out_summary.csv and prints the table.
+    python summarise_eval.py --eval_dir runs/faf_ga/<run>/evaluation_<timestamp>
+
+INPUT
+
+Files are found by recursive glob, so the names below are a contract. Rename them
+and the script finds nothing.
+
+  **/<set>/*metrics*.json      Required. One file per held-out set, written by
+                               build_model during validation and test. <set> is the
+                               containing directory name and decides how the file is
+                               read, so it must follow this naming:
+                                 contains "eval"       held-out visits (read)
+                                 contains "opt"        fitted visits (skipped)
+                                 starts "val"/"test"   which split the row lands in
+                                 "holdout_V<p>"        hold-out position p, 1-indexed
+                                                       (absent means a single
+                                                       hold-out, the 'last' strategy)
+                               The epoch is parsed from the file name ("ep=<n>"), not
+                               from the directory. Each JSON holds one record per eye
+                               with a "Subject" field (such as EYE09_OS_V2) and one
+                               entry per metric.
+  **/lesion_areas*.csv         Optional. Adds the GA-area MAE column. Needs the
+                               columns Patient_Eye, Set, GT_Area_mm2, Pred_Area_mm2.
+                               The epoch comes from the file name ("epoch_<n>").
+  **/lesion_monotonicity*.csv  Optional. Adds the monotonicity violation rate.
+
+Passing --data_csv <clinical_metadata.csv> also splits every row into minor- and
+major-growth buckets. Growth is 1 - DSC(previous visit, held-out visit) measured on
+the raw ground-truth masks. It is therefore a property of the data rather than of
+the model, and is directly comparable with the ImageFlowNet baselines. That CSV
+needs a ga_mask_path column. Masks are read on the canonical grid: --crop_size 620
+centre-crop, then resize to --score_res 512 with nearest neighbour, then binarise
+above 127.
+
+OUTPUT
+
+  <eval_dir>/leave_one_out_summary.csv    (leave_one_out_summary_best.csv with
+                                           --best_checkpoint)
+
+The same table is printed to stdout. There is one row per (split, group), where
+group is one of:
+
+  V<p> (interpolation|extrapolation)   a single hold-out position
+  last (extrapolation)                 the single-hold-out run
+  interpolation, extrapolation         pooled over positions
+  ALL                                  pooled over everything
+  minor_growth, major_growth           only with --data_csv
+
+Columns are split, group, <metric>_mean and <metric>_se for each of --metrics
+(default: DICE Precision Recall IoU HD PSNR SSIM LPIPS LOSS), and
+n_heldout_visits.
+
+Metrics are aggregated per patient-eye: averaged within an eye first, then mean and
+standard error over eyes. So n is the number of eyes (6 on the test split), and an
+eye with more held-out visits does not count for more.
+
+By default every validation epoch in the directory is pooled, which shows the
+training trajectory. Pass --best_checkpoint to report the single best validation
+epoch instead. That is the epoch checkpoint_best.pth was saved at, and the number
+to quote in a paper.
 """
 import argparse, glob, json, os, re
 import numpy as np
@@ -41,7 +95,7 @@ def _load_metric_json(path):
 
 
 def _load_mask_512(path, crop, res):
-    """Load a GA mask the SAME way the ImageFlowNet baselines' eval_faf_ga.py does: center-crop `crop` (620) then resize to
+    """Load a GA mask the SAME way the ImageFlowNet baselines' eval_faf_ga.py does: centre-crop `crop` (620) then resize to
     `res` (512) NEAREST, binarise >127. So GAP-INR's growth uses identical masks to ImageFlowNet."""
     from PIL import Image
     m = Image.open(path).convert("L")
@@ -254,7 +308,7 @@ def main():
                     d.setdefault(eye, []).append(float(v))
         return d
 
-    def summarize(label, split, recs):
+    def summarise(label, split, recs):
         # PER-PATIENT aggregation: average each metric WITHIN an eye (over that eye's held-out visits
         # in this bucket), THEN mean +/- se OVER EYES. So n = #eyes (=6 on the test set), and no eye
         # with more held-out visits is over-weighted vs one with fewer.
@@ -287,7 +341,7 @@ def main():
         # per position
         for pos in sorted({r["position"] for r in srecs}, key=lambda x: (x is None, x)):
             precs = [r for r in srecs if r["position"] == pos]
-            out_rows.append(summarize(f"V{pos} ({kind_of(split, pos)})" if pos else "last (extrapolation)",
+            out_rows.append(summarise(f"V{pos} ({kind_of(split, pos)})" if pos else "last (extrapolation)",
                                       split, precs))
         # grouped interpolation / extrapolation + overall. Prefer the PER-POSITION records; the
         # pos=None 'last' record (leave-one-out only) is a redundant pool of ALL held-out visits and
@@ -298,9 +352,9 @@ def main():
         for kind in ("interpolation", "extrapolation"):
             krecs = [r for r in grouprecs if kind_of(split, r["position"]) == kind]
             if krecs:
-                out_rows.append(summarize(kind, split, krecs))
+                out_rows.append(summarise(kind, split, krecs))
         # overall
-        out_rows.append(summarize("ALL", split, grouprecs))
+        out_rows.append(summarise("ALL", split, grouprecs))
 
     # 4b. OPT-IN minor/major GA-growth buckets (ImageFlowNet framing). Isolated + fail-soft so it
     # can never break the main interp/extrap summary. growth = 1 - DSC(prev, held-out) from GT masks.

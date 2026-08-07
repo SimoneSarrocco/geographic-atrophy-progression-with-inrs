@@ -1,19 +1,42 @@
-"""
-Segmentation-growth visualisation for GA progression.
+"""Shows where a lesion grew, not only how much. Spatial counterpart to the area plots.
 
-Given an eye's PREDICTED GA masks at a sequence of timepoints (observed +
-interpolated + extrapolated), render two publication figures that make the
-spatial progression legible:
+This is a library, not a command-line tool. It takes arrays in memory, so there is no
+file layout to satisfy. build_model calls it during evaluation. To call it yourself:
 
-  1. Contour overlay  -- the GA boundary at each week drawn on one panel, colored
-     by week (a single colormap). Shows the lesion expanding outward and in which
-     directions ("growth rings").
-  2. Onset / "volume" map -- per pixel, the EARLIEST week at which GA is predicted
-     there, as a single color-coded image (the temporal stack collapsed to one
-     map). This is the compact "volume" view: warm = late onset (recent growth),
-     cool = early/baseline atrophy.
+    from seg_growth import save_seg_growth_figure
+    save_seg_growth_figure(weeks, masks, out_path,
+                           faf_bg=None, title="", cmap="viridis",
+                           area_per_px_mm2=None)
 
-Pure function (no GAP-INR deps) so it can be unit-tested on any checkpoint.
+INPUT
+
+  weeks             Sequence of T weeks from baseline, ascending.
+  masks             Sequence of T binary GA masks of shape (H, W), aligned with
+                    weeks. These are the model's predictions, so observed,
+                    interpolated and extrapolated time points can be mixed. They only
+                    have to share one pixel grid.
+  out_path          PNG path to write. Parent directories are created.
+  faf_bg            Optional (H, W) FAF image drawn under the contours.
+  title             Figure title.
+  cmap              Matplotlib colourmap keyed by week.
+  area_per_px_mm2   Square millimetres per pixel. Pass it to annotate real areas
+                    instead of pixel counts. build_model passes
+                    _lesion_px_area_mm2, which already includes the crop-to-grid
+                    resize factor.
+
+OUTPUT
+
+One multi-panel PNG at out_path:
+
+  1. Growth rings   The GA boundary at each week on one panel, coloured by week, so
+                    the direction of growth is visible, not just its size.
+  2. Onset map      For each pixel, the earliest week GA is predicted there. This
+                    collapses the whole time series into one image. Cool colours mean
+                    atrophy was present from baseline, warm colours mean it appeared
+                    recently.
+
+Uses numpy and matplotlib only. No torch and no imports from this repository, so it
+can be run on arrays from any source.
 """
 import os
 import numpy as np
@@ -23,7 +46,7 @@ def save_seg_growth_figure(weeks, masks, out_path, faf_bg=None, title="", cmap="
                            area_per_px_mm2=None):
     """Three-panel publication figure of predicted GA progression for one eye:
 
-      (1) GA boundary contour at each week, colored by week ("growth rings");
+      (1) GA boundary contour at each week, coloured by week ("growth rings");
       (2) per-pixel onset map: earliest week each pixel becomes GA (compact 'volume');
       (3) GA-area-vs-week curve quantifying the rate alongside the spatial views.
 

@@ -84,18 +84,11 @@ def initial_setup(cmd_args=None):
     if args['inr_decoder']['out_dim'][0] != expected_sr_mods:
         print(f"WARNING: The number of output dimensions ({args['inr_decoder']['out_dim'][0]}) " 
               f"might not match the number of intensity modalities ({expected_sr_mods}).")
-    if args['model_gen']['conditions'] is not None: # check every render condition is enabled in the dataset config
-        for key in list(args['model_gen']['conditions'].keys()):
-            if not args['dataset']['conditions'][key]:
-                print(f"WARNING: The render condition {key} is not set True in the dataset config."
-                    f"Turning off the render generation for {key}.")
-                args['model_gen']['conditions'].pop(key)
-
     if args['logging']: # init weights and biases if logging is True
         wd.init(config=args, project=args['project_name'], 
                                 entity=args['wandb_entity'], name=run_name)
     
-    # Initialize TensorBoard writer
+    # Initialise TensorBoard writer
     tb_log_dir = os.path.join(args['output_dir'], 'tb_logs')
     args['tb_writer'] = SummaryWriter(log_dir=tb_log_dir)
     print(f"TensorBoard log directory: {tb_log_dir}")

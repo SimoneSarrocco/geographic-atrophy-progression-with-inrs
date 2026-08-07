@@ -3,7 +3,7 @@
 This repository adapts the open-source **CINeMA** framework (Conditional Implicit Neural Multi-Modal
 Atlas) **by Dannecker et al., 2026**, originally developed for spatio-temporal atlases of the perinatal brain. The SIREN-based
 conditional INR decoder, the FiLM latent/condition modulation, the auto-decoder training scheme, and
-the YAML configuration system come from that project and are reused here under its Apache-2.0 license.
+the YAML configuration system come from that project and are reused here under its Apache-2.0 licence.
 
 The contribution of our paper is the adaptation of the framework to longitudinal individual
 geographic atrophy prediction from fundus autofluorescence imaging: the 2D retinal data pipeline
@@ -13,7 +13,7 @@ visits of a single eye, the temporal (weeks-from-baseline) conditioning, the int
 ## Upstream framework
 
 CINeMA: Conditional Implicit Neural Multi-Modal Atlas for a Spatio-Temporal Representation of the
-Perinatal Brain — Dannecker, Sideri-Lampretsa, Starck, Mihailov, Milh, Girard, Auzias, Rueckert.
+Perinatal Brain. Dannecker, Sideri-Lampretsa, Starck, Mihailov, Milh, Girard, Auzias, Rueckert.
 *IEEE Transactions on Medical Imaging*, 2025. doi:10.1109/TMI.2025.3605194.
 Source: https://github.com/m-dannecker/CINeMA (Apache-2.0).
 
@@ -31,11 +31,11 @@ Source: https://github.com/m-dannecker/CINeMA (Apache-2.0).
 
 ## Comparison methods
 
-**Comparison baselines** — the **ImageFlowNet** family, in [`baselines/imageflownet/`](baselines/imageflownet/);
+**Comparison baselines**: the **ImageFlowNet** family, in [`baselines/imageflownet/`](baselines/imageflownet/);
 see [`docs/BASELINES.md`](docs/BASELINES.md). That directory is a lightly adapted copy of the public
 **ImageFlowNet repository by Liu et al., 2025** (https://github.com/KrishnaswamyLab/ImageFlowNet/tree/main), which is
-governed by the Yale Non-Commercial license, and the I2SB code it vendors by NVIDIA's own
-non-commercial license. See [`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md).
+governed by the Yale Non-Commercial licence, and the I2SB code it vendors by NVIDIA's own
+non-commercial licence. See [`baselines/imageflownet/ATTRIBUTION.md`](baselines/imageflownet/ATTRIBUTION.md).
 
 ```bibtex
 @inproceedings{liu2025imageflownet,

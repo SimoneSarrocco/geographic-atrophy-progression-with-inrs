@@ -6,7 +6,7 @@ import torch
 import pandas as pd
 from torch.utils.data import Dataset
 from utils import *
-from .lakefsloader import LakeFSLoader
+from .lakefs_config import make_loader, resolve_cache_path
 from PIL import Image
 import yaml
 import copy
@@ -200,32 +200,10 @@ class Data(Dataset):
         self.epoch = epoch
 
     def _init_lakefs(self):
-        if 'lakefs' in self.args['dataset']:
-            lakefs_config = self.args['dataset']['lakefs']
-            # Credentials live in an external, git-ignored file (see configs/lakefs_cfg.example.yaml).
-            # Path is configurable via `lakefs.config_path`; defaults to configs/lakefs_cfg.yaml at
-            # the repo root. If the file is absent, we fall back to local-disk data only.
-            _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            cfg_path = lakefs_config.get('config_path',
-                                         os.path.join(_repo_root, 'configs', 'lakefs_cfg.yaml'))
-            if os.path.exists(cfg_path):
-                with open(cfg_path, 'r') as f:
-                    cfg = yaml.safe_load(f)
-                self.lakefs_loader = LakeFSLoader(
-                    repo_name=lakefs_config['repo'],
-                    branch_id=lakefs_config['branch'],
-                    local_cache_path=lakefs_config['cache_path'],
-                    endpoint=cfg.get('lakefs_endpoint', cfg.get('s3_endpoint')),
-                    ca_path=cfg.get('ca_path', cfg.get('ca_bundle')),
-                    access_key=cfg.get('lakefs_access_key', cfg.get('access_key')),
-                    secret_key=cfg.get('lakefs_secret_key', cfg.get('secret_key'))
-                )
-                print(f"LakeFSLoader initialized for {self.args['dataset']['dataset_name']}")
-            else:
-                self.lakefs_loader = None
-                print("Warning: LakeFS config not found. Local data only.")
-        else:
-            self.lakefs_loader = None
+        # Optional remote store. make_loader returns None when lakeFS is not configured,
+        # in which case images are read from local disk, and raises with an actionable
+        # message when it is only half-configured. See data_loading/lakefs_config.py.
+        self.lakefs_loader = make_loader(self.args['dataset'], verbose=(self.split == 'train'))
 
 
     def _add_weeks_from_baseline_col(self, df):
@@ -317,8 +295,7 @@ class Data(Dataset):
 
         # Set the weeks_from_baseline normalisation bounds from the ACTUAL date-derived values rather
         # than a hardcoded range. This runs on the FULL dataframe (before the train/val/test split, see
-        # __init__), so every split's Dataset reads the same CSV and derives the SAME global [min,max] —
-        # keeping condition normalisation consistent across splits. Only overrides when weeks came from
+        # __init__), so every split's Dataset reads the same CSV and derives the SAME global [min,max],         # keeping condition normalisation consistent across splits. Only overrides when weeks came from
         # real dates (not the visit_week_map fallback) and the auto-range is enabled (default on).
         if computed_from_dates and self.args['dataset'].get('weeks_constraint_from_dates', True):
             w = pd.to_numeric(df['weeks_from_baseline'], errors='coerce')
@@ -335,8 +312,8 @@ class Data(Dataset):
         """Drop eyes with fewer than `min_valid_visits_eval` valid visits from val/test.
 
         Leave-one-visit-out validation requires at least 2 visits per eye (one held out, >=1 to fit
-        the latent). Eyes with too few VALID (file-present) visits — e.g. EYE28_OS, which has only 1
-        FAF+mask visit — cannot be held out and would otherwise pollute the eval pool. self.df already
+        the latent). Eyes with too few VALID (file-present) visits, e.g. EYE28_OS, which has only 1
+        FAF+mask visit, cannot be held out and would otherwise pollute the eval pool. self.df already
         contains only file-present visits, so the per-eye row count is the valid-visit count.
         """
         min_visits = int(self.args['dataset'].get('min_valid_visits_eval', 2))
@@ -410,10 +387,12 @@ class Data(Dataset):
                     return None
             return local_path
         else:
+            # No lakeFS: read straight from the cache directory. Same layout the loader
+            # downloads into (<cache_path>/<branch>/data/...), so a cache filled by a
+            # previous lakeFS run is still found here.
             lakefs_config = self.args['dataset'].get('lakefs', {})
-            cache_base = lakefs_config.get('cache_path', './cache/faf_ga')
             branch = lakefs_config.get('branch', 'main')
-            local_path = os.path.join(cache_base, branch, path)
+            local_path = os.path.join(resolve_cache_path(lakefs_config), branch, path)
             return local_path
 
     def _load_majority_vote_mask(self, row_dict):
@@ -466,7 +445,7 @@ class Data(Dataset):
     def _compute_patient_stats(self):
         """
         Pre-computes per-patient-eye intensity statistics used by the patient-level
-        normalization modes:
+        normalisation modes:
 
           * 'minmax_patient' : shared (min, max) across all of an eye's visits. NOTE this is
             DEGENERATE on FAF-GA FAF (min=0 from the black registration frame and max=255 from
@@ -476,7 +455,7 @@ class Data(Dataset):
             eye's BASELINE visit (earliest temporal_condition) is the reference; we store its
             FOREGROUND (non-zero, i.e. excluding the frame) median, IQR and p1/p99 per modality.
             Other visits are mapped onto this reference's centre+spread at load time, then squashed
-            to [0,1] by the reference p1/p99 — this actually equalizes brightness across visits.
+            to [0,1] by the reference p1/p99, this actually equalises brightness across visits.
 
         'minmax_patient_robust' (option 1) is purely per-visit and needs NO precomputation here.
         """
@@ -576,7 +555,7 @@ class Data(Dataset):
             values = torch.tensor(values, dtype=torch.float32)
             conditions = self.load_conditions(row_dict)[None, :].expand(coords.shape[0], -1)
             
-            # sub_id_int: patient-eye index (shared across visits) — for latent and transformation lookup
+            # sub_id_int: patient-eye index (shared across visits), for latent and transformation lookup
             if self.args['dataset'].get('independent_visits', False):
                 if hasattr(self, 'parent_indices'):
                     sub_idx = self.parent_indices[idx]
@@ -593,7 +572,7 @@ class Data(Dataset):
             return coords, values, conditions, idx_df, time_vals
         except Exception as e:
             # Fail loudly: a data error (missing/corrupt image or mask, bad path, shape mismatch)
-            # must surface, not be silently masked by substituting a different visit — which would
+            # must surface, not be silently masked by substituting a different visit, which would
             # corrupt training/metrics and duplicate samples. Re-raise with full context.
             sub_id = row_dict.get(self.id_column, 'unknown') if 'row_dict' in locals() else 'unknown'
             import traceback
@@ -663,7 +642,7 @@ class Data(Dataset):
         
         # If the path is absolute and within the LakeFS cache but doesn't exist yet,
         # let it fall through to the LakeFS download logic below
-        # (no early return — the LakeFSLoader will handle the download)
+        # (no early return, the LakeFSLoader will handle the download)
 
         # FAF-GA Path Reconstruction Logic
         if self.lakefs_loader and self.args['dataset']['dataset_name'] == 'faf_ga':
@@ -706,7 +685,7 @@ class Data(Dataset):
         return path
 
     def _is_left_eye(self, row_dict):
-        """True if this row's eye is a LEFT (OS) eye — from the Eye_ID suffix (…_OS) or a
+        """True if this row's eye is a LEFT (OS) eye, from the Eye_ID suffix (…_OS) or a
         Laterality/Eye column. Used by dataset.canonicalize_laterality to mirror OS eyes to OD."""
         eid = str(row_dict.get(self.id_column, '') or row_dict.get('Eye_ID', '')).upper()
         lat = str(row_dict.get('Laterality', row_dict.get('Eye', '')) or '').upper()
@@ -737,7 +716,7 @@ class Data(Dataset):
             
             # FAF-GA: Resize to world_bbox ONLY if no sampling_bbox is specified.
             # When sampling_bbox is set, keep original resolution so that
-            # load_coords_and_values can center-crop exact pixels via
+            # load_coords_and_values can centre-crop exact pixels via
             # coordinate filtering (no interpolation artifacts).
             if self.args['dataset'].get('dataset_name') == 'faf_ga':
                 # Mask modality (last key) must resample with NEAREST to stay binary; the FAF
@@ -746,7 +725,7 @@ class Data(Dataset):
                 resample = Image.Resampling.NEAREST if is_seg_mod else Image.Resampling.BILINEAR
                 crop_pre = self.args['dataset'].get('crop_before_resize')
                 if crop_pre is not None:
-                    # Center-crop native (768) -> crop_pre (e.g. 620) to remove the per-visit black
+                    # Centre-crop native (768) -> crop_pre (e.g. 620) to remove the per-visit black
                     # registration frame while keeping ALL GA (max GA half-extent 302px -> >=604 crop),
                     # THEN resize the crop DOWN to world_bbox (e.g. 512). Lets the whole baseline
                     # comparison run at 512 with no GA clipping and no upsampling (a direct 512 crop
@@ -764,7 +743,7 @@ class Data(Dataset):
             # Canonicalize laterality (DETERMINISTIC, not augmentation): mirror LEFT (OS) eyes to
             # RIGHT (OD) orientation so the WHOLE dataset shares one orientation. Applied to every
             # modality (FAF + mask) with the SAME horizontal flip -> they stay aligned; a horizontal
-            # flip commutes with the center-crop/resize above and leaves ScaleXSlo/area unchanged.
+            # flip commutes with the centre-crop/resize above and leaves ScaleXSlo/area unchanged.
             if self.args['dataset'].get('canonicalize_laterality', False) and self._is_left_eye(row_dict):
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
@@ -820,7 +799,7 @@ class Data(Dataset):
         x_min, y_min, z_min = 0, 0, 0
         w_box, h_box, d_box = None, None, None
 
-        if sampling_bbox is not None:  # if sampling_bbox is specified, we center-crop the original images
+        if sampling_bbox is not None:  # if sampling_bbox is specified, we centre-crop the original images
             if is_native_2d or is_compat_2d:  # if we have 2d images
                 h, w = last_mod.shape[:2]
                 if len(sampling_bbox) == 2:
@@ -899,7 +878,7 @@ class Data(Dataset):
         
         # Since data is pre-registered (intra-visit and across-visits), we bypass 
         # the transformation into world coordinates and use local pixel coordinates 
-        # normalized to [-1, 1].
+        # normalised to [-1, 1].
         if is_native_2d or is_compat_2d:
             c_nz_xy = c_nz[:, :2] if is_compat_2d else c_nz  # drop the singleton depth index
             coords = c_nz_xy[:, ::-1].astype(np.float32)
@@ -926,13 +905,13 @@ class Data(Dataset):
             coords = np.clip(coords, -1.0, 1.0)
             assert_correct_coord_normalization(coords)
             
-            # Apply Normalization
+            # Apply Normalisation
             norm_type = self.args['dataset']['normalize_values']
             sub_id = row_dict['sub_id_int']
             has_seg = self.args['inr_decoder']['out_dim'][-1] > 0
             
             if norm_type == 'minmax_patient' and hasattr(self, 'patient_stats'):
-                # Patient-level normalization (across visits)
+                # Patient-level normalisation (across visits)
                 stats = self.patient_stats[sub_id]
                 if has_seg:
                     values_mod = values[..., :-1]
@@ -951,7 +930,7 @@ class Data(Dataset):
                 else:
                     values = values_mod
             elif norm_type == 'minmax_patient_robust':
-                # OPTION 1 — per-VISIT robust percentile scaling on the foreground modality
+                # OPTION 1, per-VISIT robust percentile scaling on the foreground modality
                 # channels: map this visit's [p1, p99] -> [0, 1] and clip. Excluding the
                 # extremes (the zero frame already isn't sampled; p99 ignores saturated pixels)
                 # removes per-visit exposure/gain mismatch that plain min-max leaves untouched.
@@ -966,7 +945,7 @@ class Data(Dataset):
                 else:
                     values = values_mod
             elif norm_type == 'ref_match' and hasattr(self, 'patient_stats'):
-                # OPTION 2 — reference-based robust LINEAR matching. Align this visit's foreground
+                # OPTION 2, reference-based robust LINEAR matching. Align this visit's foreground
                 # centre+spread (median, IQR) to the eye's BASELINE visit, then squash to [0,1] by
                 # the reference p1/p99. Because every visit is mapped onto the same reference
                 # distribution, inter-visit brightness is genuinely equalized (unlike min-max).
@@ -984,7 +963,7 @@ class Data(Dataset):
                 else:
                     values = values_mod
             else:
-                # Default: visit-level normalization (individual)
+                # Default: visit-level normalisation (individual)
                 values = normalize_intensities(values, norm_type, has_seg=has_seg)
         return coords, values
     
@@ -1056,7 +1035,7 @@ class Data(Dataset):
         return temporal_key
 
     def load_time(self, row_dict, normalize=True, allow_extrapolation=False):
-        """Extract and normalize the temporal condition (the `temporal_condition` variable, e.g.
+        """Extract and normalise the temporal condition (the `temporal_condition` variable, e.g.
         AgeatVisit) to [-1, 1] as the time-input scalar.
 
         allow_extrapolation=True bypasses the in-range clamp so novel-visit predictions can advance
@@ -1093,7 +1072,7 @@ class Data(Dataset):
         for key in self.args['dataset']['conditions']:
             if self.args['dataset']['conditions'][key]: # if condition is enabled
                 if time_as_input and key == temporal_key:
-                    continue  # Skip temporal condition — it goes through input path --> to avoid using the same variable as both input and conditioning vector
+                    continue  # Skip temporal condition, it goes through input path --> to avoid using the same variable as both input and conditioning vector
                 val = row_dict[key]
                 if normalize:
                     c_min, c_max = self.args['dataset']['constraints'][key]['min'], self.args['dataset']['constraints'][key]['max']
@@ -1232,11 +1211,11 @@ class Data(Dataset):
     def get_longitudinal_indices(self, holdout_position=None, single_visit_to='eval', support_k=None,
                                  pair_source=None, pair_target=None):
         """
-        Groups visits by subject and splits them into optimization and evaluation indices.
+        Groups visits by subject and splits them into optimisation and evaluation indices.
 
         Args:
             holdout_position: 1-indexed chronological position of the visit to hold out.
-                              None = hold out the last visit (default behavior).
+                              None = hold out the last visit (default behaviour).
                               e.g., 2 = hold out the 2nd chronological visit.
             pair_source/pair_target: if BOTH set (1-indexed positions, source < target), run the
                               per-PAIR forecast: opt = ONLY the visit at `pair_source`, eval = ONLY
@@ -1245,17 +1224,17 @@ class Data(Dataset):
             single_visit_to:  where to route patient-eyes with a single visit (no visit to
                               hold out). 'eval' (default, used for validation) keeps the lone
                               visit as evaluation-only; 'opt' (used for the test set) fits the
-                              latent on the lone acquired visit instead — mirroring the clinical
+                              latent on the lone acquired visit instead, mirroring the clinical
                               case where a new patient is imaged once and the latent is optimised
                               on that image to then predict future states.
             support_k:        if set, OVERRIDES holdout: fit the latent on the FIRST `support_k`
                               chronological visits (opt) and evaluate on ALL remaining (later)
-                              visits (eval) — i.e. "given the first k scans, forecast the rest".
+                              visits (eval), i.e. "given the first k scans, forecast the rest".
                               support_k=1 = the one-visit clinical forecast (fit on baseline,
                               predict every future visit, scored against GT).
 
         Returns:
-            opt_pos_idcs:  list of positional indices for latent optimization.
+            opt_pos_idcs:  list of positional indices for latent optimisation.
             eval_pos_idcs: list of positional indices for evaluation (held-out visits).
         """
         if holdout_position == 'none':
@@ -1425,15 +1404,6 @@ class Data(Dataset):
 
         return df
     
-    def get_condition_values(self, condition_key, normed=True, device=None):
-        """
-        Get all values together with their entry_idx of a condition_key from the dataframe.
-        Returns one value per visit (row) — N_visits total.
-        """
-        values = torch.tensor(self.df[condition_key].values, dtype=torch.float32, device=device)
-        if normed:
-            values = normalize_condition(self.args, condition_key, values)
-        return values, torch.arange(len(self.df), device=device)
 
     def sample_subjects(self, df, verbose=True):
             """
@@ -1609,7 +1579,7 @@ class Data(Dataset):
         plt.figure()
         # Midpoints for bar chart
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        # plot ticks for every bin center, with slight rotation of the labels
+        # plot ticks for every bin centre, with slight rotation of the labels
         plt.bar(bin_centers, counts, width=(bin_edges[1] - bin_edges[0]) * 0.9)
         plt.xticks(bin_centers, rotation=45)
         # plot every y-tick 
@@ -1626,7 +1596,7 @@ class Data(Dataset):
 
     def _init_data_augmentation(self):
         """
-        Initialize data augmentation.
+        Initialise data augmentation.
         """
         aug_cfg = self.args['data_augmentation']
         mode = aug_cfg.get('mode', 'pseudo_eye')

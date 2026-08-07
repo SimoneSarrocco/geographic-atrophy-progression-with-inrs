@@ -19,22 +19,22 @@ A single comma-separated table, **one row per patient-eye visit**, pointed to by
 
 | Column | Required | Type | Meaning / how to construct |
 |---|---|---|---|
-| `Eye_ID` | **yes** | str | Patient-eye identity (`id_column`); the key mapping to one latent code. Identical across that eye's visits, e.g. `EYE07_OD`. Convention: suffix `_OD` (right) / `_OS` (left) — used for laterality (§4). |
-| `split` | **yes** | str | `train` / `val` / `test` (`split_column`). Defines the partition (§6). Build with `preprocessing/add_split_column.py` (patient-wise). |
+| `Eye_ID` | **yes** | str | Patient-eye identity (`id_column`); the key mapping to one latent code. Identical across that eye's visits, such as `EYE07_OD`. Convention: suffix `_OD` (right) or `_OS` (left), used for laterality (section 4). |
+| `split` | **yes** | str | `train` / `val` / `test` (`split_column`). Defines the partition (section 6). Build with `preprocessing/add_split_column.py` (patient-wise). |
 | `Patient_ID` | **yes** | str | Patient identifier; used to build image/mask paths and group eyes. |
 | `Eye` | **yes** | str | `OD` / `OS`; used for path reconstruction and laterality. |
 | `Visit_ID` | **yes** | str/int | Visit id, e.g. `V01`, or an integer `1` (auto-formatted to `V0x`). Orders visits and builds paths. |
-| `Visit_Number` | if using `visit_week_map` | int | Ordinal visit index (1,2,3,…). Only needed for the fixed-schedule time option (§3-C). |
-| `faf_path` | **yes** | str | Location of the FAF image (§5). |
-| `ga_mask_path` | **yes** | str | Location of the GA mask (§5). |
-| `visit_date` / `Visit_date` | recommended | number or date | Per-visit date; numeric = Excel serial day, else a parseable date. Source for `weeks_from_baseline` (§3-A). |
-| `diff` | alt. to date | number | Elapsed **days** from the eye's baseline visit (§3-B). |
+| `Visit_Number` | if using `visit_week_map` | int | Ordinal visit index (1,2,3,…). Only needed for the fixed-schedule time option (section 3-C). |
+| `faf_path` | **yes** | str | Location of the FAF image (section 5). |
+| `ga_mask_path` | **yes** | str | Location of the GA mask (section 5). |
+| `visit_date` / `Visit_date` | recommended | number or date | Per-visit date; numeric = Excel serial day, else a parseable date. Source for `weeks_from_baseline` (section 3-A). |
+| `diff` | alt. to date | number | Elapsed **days** from the eye's baseline visit (section 3-B). |
 | `AgeatVisit` | optional | float | Age (years) at the visit; usable as the time axis (`temporal_condition: AgeatVisit`). |
 | `ScaleXSlo`, `ScaleYSlo` | recommended | float | Physical pixel size (mm/pixel), to convert GA pixels → mm². Default `1.0` if absent. |
-| `lesion_size`, … | optional | float | Any extra numeric column can be enabled as a conditioning/constraint variable (§2). |
+| `lesion_size`, … | optional | float | Any extra numeric column can be enabled as a conditioning/constraint variable (section 2). |
 
 > Eye IDs in `configs/expected_split.yaml` are anonymized placeholders (`EYE01_OD …`). Replace that
-> file (and the CSV) with your own IDs, or regenerate the split (§6).
+> file (and the CSV) with your own IDs, or regenerate the split (section 6).
 
 ---
 
@@ -69,14 +69,14 @@ Every extra covariate must (a) be a CSV column and (b) be listed under both `con
 
 Computed automatically at load time (`_add_weeks_from_baseline_col`) from the first available of:
 
-- **A — dates (recommended):** `visit_date`/`Visit_date`. Numeric ⇒ Excel serial **days**; else parsed
+- **A, dates (recommended):** `visit_date`/`Visit_date`. Numeric values are Excel serial **days**; anything else is parsed
   as a date. `weeks = (date − eye's earliest date) / 7`.
-- **B — elapsed days:** a `diff` column (days from baseline). `weeks = diff / 7`.
-- **C — fixed schedule:** neither of the above ⇒ `visit_week_map` in `config_data.yaml` maps
+- **B, elapsed days:** a `diff` column (days from baseline). `weeks = diff / 7`.
+- **C, fixed schedule:** if neither of the above is present, `visit_week_map` in `config_data.yaml` maps
   `Visit_Number` → weeks, e.g. `{1: 0, 2: 12, 3: 24, 4: 48}`.
 
 With `weeks_constraint_from_dates: true`, the normalisation `[min, max]` is taken from the actual
-date-derived global range. You never pre-compute `weeks_from_baseline` — just provide A, B, or C.
+date-derived global range. You never pre-compute `weeks_from_baseline`. Just provide A, B, or C.
 
 ---
 
@@ -91,7 +91,7 @@ suffix (`…_OS`) or the `Eye`/`Laterality` column.
 
 ## 5. Folder structure for images and masks
 
-**lakeFS is optional** (see §7). The two modes below differ only in *where the `data/` tree lives*.
+**lakeFS is optional** (see section 7). The two modes below differ only in *where the `data/` tree lives*.
 
 ### 5.1 The canonical `data/` tree
 
@@ -121,7 +121,7 @@ in the same tree for tidiness:
 data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/<Patient_ID>_<Eye>_<Vxx>_FAF.png
 ```
 
-### 5.2 LOCAL setup (no lakeFS) — recommended default
+### 5.2 LOCAL setup (no lakeFS), the recommended default
 
 Masks are resolved at `<cache_path>/<branch>/data/…`. With the defaults
 `cache_path: ./cache/faf_ga` and `branch: main` (from the `lakefs:` block of `config_data.yaml`), the
@@ -136,7 +136,7 @@ tree is:
 ```
 
 Concretely, set in the CSV: `faf_path = ./cache/faf_ga/main/data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/<Patient_ID>_<Eye>_<Vxx>_FAF.png`
-(absolute paths also work — if `faf_path` is an existing absolute path it is used verbatim). The FAF
+(absolute paths also work: if `faf_path` is an existing absolute path it is used verbatim). The FAF
 image may live anywhere as long as `faf_path` points to it; **only the masks are bound to the
 `cache_path/branch/data/…` layout above.** To put everything under a single custom root, just change
 `cache_path` accordingly (e.g. `cache_path: /data/my_cohort` → masks under
@@ -146,7 +146,7 @@ image may live anywhere as long as `faf_path` points to it; **only the masks are
 
 The lakeFS repository holds the same `data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/…` object layout on
 the chosen branch. On first use, objects are downloaded to `<cache_path>/<branch>/data/…` (same local
-tree as §5.2). Configure:
+tree as section 5.2). Configure:
 
 ```yaml
 # configs/config_data.yaml  (faf_ga block)
@@ -156,8 +156,46 @@ lakefs:
   cache_path: ./cache/faf_ga     # local download cache
 ```
 
-and copy `configs/lakefs_cfg.example.yaml` → `configs/lakefs_cfg.yaml` with your endpoint/keys. lakeFS
-object keys mirror the tree: `data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/<file>`.
+Then supply the credentials. Copy the template and fill in four values:
+
+```bash
+cp configs/lakefs_cfg.example.yaml configs/lakefs_cfg.yaml
+```
+
+```yaml
+# configs/lakefs_cfg.yaml   (git-ignored, never commit it)
+endpoint:    "https://my-lakefs-host:8000"   # the S3 gateway, not the web UI
+access_key:  "..."                           # lakeFS UI: Administration -> Access Keys
+secret_key:  "..."                           # shown once, when the key is created
+ca_bundle:   ""                              # CA file for TLS; empty disables verification
+```
+
+Every one of these can come from the environment instead, which is usually better on a cluster or in
+CI. Environment values win over the file:
+
+| Variable | Replaces |
+|---|---|
+| `GAPINR_LAKEFS_ENDPOINT` | `endpoint` |
+| `GAPINR_LAKEFS_ACCESS_KEY` | `access_key` |
+| `GAPINR_LAKEFS_SECRET_KEY` | `secret_key` |
+| `GAPINR_LAKEFS_CA_BUNDLE` | `ca_bundle` |
+| `GAPINR_LAKEFS_REPO` / `_BRANCH` / `_CACHE` | the `lakefs:` block above |
+| `GAPINR_LAKEFS_CFG` | the path of `lakefs_cfg.yaml` |
+
+Check the settings before starting a long run:
+
+```bash
+python download_lakefs_data.py --check      # prints what it resolved, makes one request
+python download_lakefs_data.py              # pre-fetch every image into the cache
+```
+
+`--check` never prints your secret key. All three of `endpoint`, `access_key` and `secret_key` are
+required: set none of them to read from local disk, and setting only some is reported as an error
+straight away rather than as an obscure S3 failure later.
+
+lakeFS object keys mirror the local tree: `data/<Patient_ID>/<Eye>/<Vxx>/Spectralis_faf/<file>`, and
+downloads land at `<cache_path>/<branch>/data/…`, exactly where the local-disk path in section 5.2
+looks. So a cache filled over lakeFS keeps working when you later run with no credentials.
 
 ---
 
@@ -171,7 +209,7 @@ from val/test (leave-one-out needs ≥2 visits).
 `preprocessing/add_split_column.py` writes a patient-wise split (both eyes of a patient in the same
 split; default 70/15/15, seed 42). The canonical partition is frozen in `configs/expected_split.yaml`
 (25 train / 5 val / 6 test eyes in the paper), and `validate_splits()` **aborts every run** if the
-resolved partition differs or train/val/test overlap — a guard against silent drift and leakage.
+resolved partition differs or train/val/test overlap. This guards against silent drift and leakage.
 Update or regenerate `expected_split.yaml` for your own cohort.
 
 ---
@@ -180,9 +218,10 @@ Update or regenerate `expected_split.yaml` for your own cohort.
 
 lakeFS is an **optional** remote-store convenience, off by default:
 
-- If `configs/lakefs_cfg.yaml` does not exist, the loader prints "Local data only" and reads every
-  file from local disk (§5.2). This is the default — only the `.example` template ships.
-- To use a remote store, follow §5.3.
+- With no credentials the loader prints `[lakeFS] not configured, reading images from local disk`
+  and reads every file from local disk (section 5.2). This is the default. Only the `.example`
+  template ships.
+- To use a remote store, follow section 5.3.
 - You may also delete the `lakefs:` block entirely for a purely local run (masks then resolve under
   `./cache/faf_ga/main/data/…` by default).
 
@@ -196,11 +235,11 @@ Performed in `data_loading/dataset.py`:
 
 1. **Load** FAF and mask as 2-D grayscale (`PIL`).
 2. **Center-crop → resize:** crop native (e.g. 768 → **620**, `crop_before_resize`) to drop the black
-   registration frame while keeping all GA, then resize to `world_bbox` (e.g. **512**) — FAF bilinear,
+   registration frame while keeping all GA, then resize to `world_bbox` (**512** here): FAF bilinear,
    mask nearest. A crop (not a plain resize), so physical scale is preserved.
 3. **Binarize** the mask to `{0, 1}`.
 4. **Coordinate sampling** (`sampling_strategy: all`): every pixel → a coordinate normalised to `[-1, 1]`.
-5. **Intensity normalization** (`normalize_values: minmax`, paper default): each visit's FAF → `[0, 1]`.
+5. **Intensity normalisation** (`normalize_values: minmax`, paper default): each visit's FAF → `[0, 1]`.
 6. **Conditioning:** `weeks_from_baseline` (and enabled covariates) attached per visit, normalised to
    `[-1, 1]` via the `constraints` ranges.
 
@@ -218,21 +257,20 @@ factor, so areas are comparable across methods.
 
 The `preprocessing/` scripts document how the paper's CSV was assembled from a raw export. They are
 reference material to adapt, not a chain to run in order, and they overwrite
-`data/clinical_metadata.csv` — including its `split` column. Read
+`data/clinical_metadata.csv`, including its `split` column. Read
 [`../preprocessing/README.md`](../preprocessing/README.md) before running any of them.
 
-- `enrich_clinical_data.py` — merge per-scan physical-scale metadata into the raw CSV
-- `physical_enrichment.py` — add `ScaleXSlo`/`ScaleYSlo` (mm/pixel) columns to the raw CSV
-- `add_split_column.py` — draw the patient-wise train/val/test `split` column
+- `enrich_clinical_data.py`: merge per-scan physical-scale metadata into the raw CSV
+- `add_split_column.py`: draw the patient-wise train/val/test `split` column
 
 ---
 
 ## 10. Checklist for your own cohort
 
-1. Build `data/clinical_metadata.csv` with the columns in §1 (one row per eye-visit).
-2. Provide `visit_date` **or** `diff` **or** `Visit_Number` + `visit_week_map` for the time axis (§3).
-3. Lay out FAF images and grader mask(s) per §5 (§5.2 local, or §5.3 lakeFS); pick `mask_grader_mode`
+1. Build `data/clinical_metadata.csv` with the columns in section 1 (one row per eye-visit).
+2. Provide `visit_date` **or** `diff` **or** `Visit_Number` + `visit_week_map` for the time axis (section 3).
+3. Lay out FAF images and grader mask(s) per section 5 (section 5.2 local, or section 5.3 lakeFS); pick `mask_grader_mode`
    (`single` if one mask/visit).
-4. Add the `split` column and regenerate `configs/expected_split.yaml` for your eye IDs (§6).
+4. Add the `split` column and regenerate `configs/expected_split.yaml` for your eye IDs (section 6).
 5. Point `tsv_file` at your CSV; adjust `crop_before_resize`/`world_bbox` to your image size if needed.
 6. Run `python run.py` (see the main [README](../README.md)).

@@ -9,13 +9,12 @@
 #   ./run_pipeline.sh --gpu 3                 # force a specific GPU
 #   ./run_pipeline.sh --config_model configs/config_model.yaml
 #   ./run_pipeline.sh --skip-train --run runs/faf_ga/faf_ga_20260624_204828_loc   # eval+diag only
-#   ./run_pipeline.sh --stages train,eval     # subset of stages (train,eval,tsens,traj)
+#   ./run_pipeline.sh --stages train,eval     # subset of stages (train,eval,traj)
 #
 # Stages:
 #   train  -> run.py                       (validate_splits guard runs first)
-#   eval   -> evaluate.py (val LOO + test LOO) -> summarize_eval (auto)
-#   tsens  -> temporal_sensitivity.py      (static-collapse check; train, no TTA)
-#   traj   -> plot_trajectories.py         (multi-patient trajectory figure, test)
+#   eval   -> evaluate.py (val LOO + test LOO) -> summarise_eval (auto)
+#   traj   -> plot_lesion_size_trajectories.py   (per-eye GA-area panel, test)
 # =============================================================================
 set -euo pipefail
 
@@ -26,9 +25,9 @@ cd "$HERE"
 GPU=""
 RUN_DIR=""
 CONFIG_MODEL="configs/config_model.yaml"
-STAGES="train,eval,tsens,traj"
+STAGES="train,eval,traj"
 SKIP_TRAIN=0
-EPOCHS_VAL=""          # optional override for eval/tsens TTA epochs
+EPOCHS_VAL=""          # optional override for the eval TTA epochs
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -86,7 +85,7 @@ EV_ARGS=()
 
 # =============================================================================
 # 2) EVAL  (val LOO for model selection + test LOO for the paper number)
-#    evaluate.py auto-runs summarize_eval.py at the end (interp vs extrap table).
+#    evaluate.py auto-runs summarise_eval.py at the end (interp vs extrap table).
 # =============================================================================
 if has_stage eval; then
   echo; echo "================ STAGE: EVAL ================"
@@ -96,23 +95,13 @@ if has_stage eval; then
 fi
 
 # =============================================================================
-# 3) TSENS  (static-collapse diagnostic on TRAIN eyes, no TTA -> fast)
-# =============================================================================
-if has_stage tsens; then
-  echo; echo "================ STAGE: TEMPORAL SENSITIVITY ================"
-  [[ -z "$CKPT" ]] && { echo "ERROR: no checkpoint in $RUN_DIR"; exit 1; }
-  $PY temporal_sensitivity.py --checkpoint "$CKPT" --split train \
-      2>&1 | tee "$RUN_DIR/tsens.log"
-fi
-
-# =============================================================================
-# 4) TRAJ  (multi-patient predicted-trajectory figure from the test lesion CSV)
+# 3) TRAJ  (per-eye GA-area progression panel from the test lesion CSV)
 # =============================================================================
 if has_stage traj; then
   echo; echo "================ STAGE: TRAJECTORIES ================"
   CSV=$(ls -1v "$RUN_DIR"/evaluation_*/lesion_analysis/lesion_areas_test_epoch_*.csv 2>/dev/null | tail -1 || true)
   if [[ -n "$CSV" ]]; then
-    $PY plot_trajectories.py --csv "$CSV" --split test 2>&1 | tee "$RUN_DIR/traj.log"
+    $PY plot_lesion_size_trajectories.py --csv "$CSV" --split test 2>&1 | tee "$RUN_DIR/traj.log"
   else
     echo "  (no test lesion_areas CSV found yet; run the eval stage first)"
   fi
@@ -124,5 +113,4 @@ echo "Run dir : $RUN_DIR"
 echo "Monitor : tensorboard --logdir $RUN_DIR/tb_logs"
 echo "Key outputs:"
 echo "  - eval summary : $RUN_DIR/evaluation_*/leave_one_out_summary.csv  (interp vs extrap DICE/IoU/areaMAE)"
-echo "  - collapse chk : $RUN_DIR/temporal_sensitivity_*/*summary.json     (COHORT VERDICT)"
-echo "  - trajectories : $RUN_DIR/evaluation_*/lesion_analysis/*overlay.png + *grid.png"
+echo "  - trajectories : $RUN_DIR/evaluation_*/lesion_analysis/lesion_size_trajectories.png"

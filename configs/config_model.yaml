@@ -1,4 +1,4 @@
-# Model, optimizer and training configuration.
+# Model, optimiser and training configuration.
 #
 # This file is paired with configs/config_data.yaml, which defines the dataset sections. The
 # `config_data` key below selects which of those sections is used.
@@ -9,8 +9,6 @@
 #   python run.py --inr_decoder__hidden_size 512
 # `python run.py --help` lists them; every other key is set here, in the file.
 
-root_dir: ''            # empty = current working directory
-
 # --------- Logging ---------
 logging: False          # log to wandb
 output_dir: ./runs/faf_ga  # run dirs (checkpoints, reconstructions, TB logs, metric CSVs) go here
@@ -20,14 +18,11 @@ config_data: faf_ga_twovar_wktemporal_512  # dataset section in configs/config_d
 
 # --------- Device ---------
 device: cuda
-device_dataset: cuda
 amp: False
 seed: 1927
 
 # --------- General options ---------
-generate_cond_renders: False  # generate the conditioned (spatio-temporal) renderings
 mask_reconstruction: False  # mask the reconstruction to remove noisy background
-save_certainty_maps: False  # save the per-class probability maps
 compute_metrics: True
 overfit: False          # train and validate on the same eyes (sanity check, not a real run)
 save_imgs:              # save reconstruction figures per split
@@ -47,14 +42,7 @@ data_augmentation:
   # longitudinal signal stay consistent. 'stochastic': per-load translation/noise on the same latent
   # (uses augment_translation / augment_noise below).
   mode: 'pseudo_eye'
-  n_augmentations: 1        # augmented pseudo-eyes per train eye (0 = off); 2 -> 3x the eyes
-  # --- Geometric (applied to FAF and mask together, identically across an eye's visits) ---
-  horizontal_flip: true     # OD<->OS mirror. Vertical flip is not anatomically valid, so it is not offered.
-  rotation_deg: 5.0         # max |rotation| in degrees; 0 disables
-  translation_frac: 0       # max translation as a fraction of image size; 0 disables
-  scale: 0                  # max +/- relative zoom; 0 disables
   # --- Intensity (FAF only) ---
-  gamma: 0                  # gamma sampled from [1-gamma, 1+gamma]; 0 disables
   brightness: 0             # additive brightness in [-b, b]; 0 disables
   noise_std: 0.02           # additive Gaussian noise std; 0 disables
   # --- Used only when mode: 'stochastic' ---
@@ -66,7 +54,7 @@ data_augmentation:
     mean: 0.0
     std: 0.05
 
-# --------- Optimizer ---------
+# --------- Optimiser ---------
 optimizer:
   re_init_latents: False  # re-draw latent codes from a gaussian after each epoch
   lr_inr: 1.0e-4          # NOTE the '.0': PyYAML parses bare '1e-4' as a STRING, which then crashes
@@ -104,11 +92,6 @@ optimizer:
   seg_loss_val: true
   # One batch = one eye's full visit sequence, so a pooled soft-Dice sees all of that eye's visits.
   batch_by_eye: false
-  # Penalise non-monotonic GA area across an eye's visits (GA does not shrink). Requires batch_by_eye.
-  mono_penalty:
-    activate: false
-    n_coords: 2048          # coordinates sampled to estimate the area
-    weight: 0.1
   # The val/test latents can overfit image intensities, so segmentation DICE on the optimisation
   # visits peaks and then degrades. DICE is monitored every inner epoch and the best one is kept.
   val_early_stopping:
@@ -201,22 +184,10 @@ encoding:
   base_resolution: 8
   finest_resolution: 768
 
-# --------- Conditioned rendering ---------
+# --------- Sampling grid and extrapolation ---------
 model_gen:
-  spacing: [1.0, 1.0]       # pixel spacing in mm
-  temporal_values: [70, 80, 90]
+  spacing: [1.0, 1.0]       # pixel spacing in mm, sets the coordinate grid
   future_offsets_weeks: [12, 24, 36]  # weeks past the last real visit to extrapolate
-  # Conditions to sweep when rendering. Each must be enabled in configs/config_data.yaml. Values are
-  # combined with every temporal value, so each added condition multiplies the number of renderings.
-  conditions:
-    AgeatVisit:
-     values: [50, 70, 90]
-     normed_values: False   # False = values are in dataframe units; True = normalized [-1, 1]
-    weeks_from_baseline:
-     values: [12, 24, 48]
-     normed_values: False
-  # Width of the gaussian used to average latents across the temporal axis, in weeks.
-  gaussian_span: 1.0
   cond_scale: 1.0           # scales the condition vector into the latent's value range
 
 # --------- Validation ---------
