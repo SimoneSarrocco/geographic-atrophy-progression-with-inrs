@@ -43,12 +43,22 @@ Added for this paper:
   verbatim with GAP-INR so every method sees identical data.
 - `monitor_panel.py` — the shared TensorBoard validation panel, so runs from either method are
   comparable by eye.
-- `comparison/interpolation/` — the classical interpolation/extrapolation floors.
+- `comparison/interpolation/_classical.py`, `comparison/interpolation/run_seg_interp.py` — the
+  classical interpolation/extrapolation floors, including the mask-space floor that scores GA
+  directly without a segmentor.
 
 Modified upstream files: `src/train_2pt_all.py` and `src/train_segmentor.py` (cohort support, the
 `--crop-size` option, segmentor-based GA metrics), `src/data_utils/prepare_dataset.py` (honour the
 predefined split), and small fixes in `src/nn/imageflownet_ode.py`, `src/nn/unet_i2sb.py` and
 `src/nn/unet_t_emb.py`.
+
+Rewritten upstream file: `comparison/interpolation/run_baseline_interp.py`. Upstream ships a file at
+this path; it always extrapolates to the last visit of each subarray and scores DICE against
+`segmentor(ground-truth image)` (a pseudo-label). This version instead runs true leave-one-visit-out
+over every visit, buckets the folds into interpolation vs extrapolation, and scores DICE against the
+real GA masks, adding a copy-forward reference and lesion-area MAE in mm². The interpolation maths
+itself is upstream's: the cubic spline is the same unclipped `scipy.CubicSpline` call, and the
+extrapolation branch of `linear` is upstream's "line through the last two visits" rule.
 
 Removed from the upstream tree: the other cohorts (AREDS, UCSF, brain MS/GBM, synthetic) and their
 preprocessing/registration scripts, the `external_src/SuperRetina` registration model, the

@@ -16,7 +16,7 @@ Inputs:
 
 Output: <out_dir>/lesion_size_trajectories.{png,pdf}
 """
-import argparse, math, os
+import argparse, os
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -30,40 +30,48 @@ C_GT     = "#1a1a1a"   # ground truth (reference ink)
 C_PRED   = "#d1495b"   # Ours (highlighted) -- ALL Our marks share this red
 C_HOLDEDGE = "#7a1324"  # darker red rim for the hold-out star so it pops
 C_RECON  = C_PRED; C_HOLD = C_PRED; C_INTERP = C_PRED; C_EXTRAP = C_PRED
-# classical comparators -- CVD-safe distinct hues, point+line. Computed from ALL observed GT visits
-# (the full patient history). Cubic-spline is drawn but MASKED to the visible y-band (see _panel) so
-# its extrapolation blow-up never distorts the scale.
-CLASSICAL = [("Linear",       "#2a78d6", (0, (5, 2))),
-             ("Cubic-spline", "#009e73", (0, (1, 1.6))),
-             ("Copy-forward", "#6b7280", (0, (3, 2, 1, 2)))]
+# classical comparators -- CVD-safe distinct hues. All are fit on ALL observed GT visits (the full
+# patient history) and drawn as ONE curve spanning both regimes.
+#   Linear            : ONE ordinary least-squares line, np.polyfit(w, gt, 1) -- the `linear_regression`
+#                       floor of the comparison table (_classical.py:39-47).
+#   Cubic-spline      : ONE scipy CubicSpline through every observed visit, continued past the last
+#                       knot. CLAMPED to the visible y-band (see _panel) so its blow-up never distorts
+#                       the scale; the point where it leaves the band is flagged.
+#   Copy-forward      : last observed area (no progression).
+CLASSICAL = [("Linear",            "#2a78d6", (0, (5, 2))),
+             ("Cubic-spline",      "#009e73", (0, (1, 1.6))),
+             ("Copy-forward",      "#6b7280", (0, (3, 2, 1, 2)))]
 
 
 def _classical_area(w_obs, a_obs, w_q, method):
-    """Predict GA area at query weeks w_q from ALL observed GT visits (w_obs, a_obs) = the FULL patient
-    history. The computation is regime-aware, matching how the numbers are scored:
+    """Predict GA area at query weeks w_q from the support visits (w_obs, a_obs):
 
-      INTERPOLATION  (query week within the observed range) is computed BETWEEN THE TWO BRACKETING
-                     existing visits -- linear: straight interpolation of the two neighbours
-                     (``np.interp``); cubic: the natural cubic spline through all observed visits.
-      EXTRAPOLATION  (query week beyond the LAST observed visit) uses the WHOLE history -- linear: ONE
-                     straight line, the full-history least-squares SLOPE anchored at the last observed
-                     visit (so it is a single straight ray with no kink and continuous with the
-                     observed trajectory); cubic: the same spline extended past the last knot.
-      Copy-forward   = last observed area (no progression). Areas clamped >= 0 (GA cannot be negative).
+      Linear         ONE ordinary least-squares line, both coefficients from np.polyfit(w, a, 1),
+                     valid over the whole time axis -- interpolation and extrapolation are the SAME
+                     line, no regime switch. This is the `linear_regression` floor of the comparison
+                     table (_classical.py:39-47), which likewise fits one OLS line over its support
+                     and evaluates it at the target whether that target is interior or in the future.
+      Cubic-spline   one scipy CubicSpline through all support visits (scipy defaults: not-a-knot,
+                     extrapolate=True), evaluated at w_q; past the last knot this is the same spline continued (see below).
+      Copy-forward   last observed area (no progression). Areas clamped >= 0 (GA cannot be negative)
+                     for the regression line and Copy-forward; the spline is deliberately NOT clamped.
+
+    Cubic-spline is returned RAW (no >=0 clamp), matching ImageFlowNet's `_cubic_spline_interp`, which
+    calls scipy `CubicSpline` with the defaults (bc_type='not-a-knot', extrapolate=True) and does not
+    clip. With only 4 visits not-a-knot degenerates to a SINGLE global cubic, so past the last knot the
+    curve diverges as (t - t_last)^3 -- often downwards through zero. Clamping that to 0 here would
+    disguise the divergence as a flat, plausible-looking floor; _panel clamps it to the plot band
+    instead and marks the exit point.
     """
     w_obs = np.asarray(w_obs, float); a_obs = np.asarray(a_obs, float); w_q = np.asarray(w_q, float)
-    last = w_obs.max()
     if method == "Copy-forward" or len(w_obs) < 2:
         return np.clip(np.full_like(w_q, a_obs[-1]), 0.0, None)
     if method == "Cubic-spline":
         from scipy.interpolate import CubicSpline
-        return np.clip(CubicSpline(w_obs, a_obs)(w_q), 0.0, None)          # full history: interp + extrap
+        return CubicSpline(w_obs, a_obs)(w_q)                              # full history: interp + extrap, unclipped
     if method == "Linear":
-        slope = np.polyfit(w_obs, a_obs, 1)[0]                             # full-history least-squares slope
-        y = np.where(w_q <= last + 1e-9,
-                     np.interp(w_q, w_obs, a_obs),                         # interp: between bracketing visits
-                     a_obs[-1] + slope * (w_q - last))                     # extrap: single straight ray, full-history slope
-        return np.clip(y, 0.0, None)
+        slope, intercept = np.polyfit(w_obs, a_obs, 1)                     # one OLS fit, no regime switch
+        return np.clip(slope * w_q + intercept, 0.0, None)
     raise ValueError(method)
 
 
@@ -131,7 +139,7 @@ def _despine(ax):
 
 
 def _panel(ax, eye, rec, new, title_fs=10):
-    w, gt, pr, ho = rec["weeks"], rec["gt"], rec["pred"], rec["heldout"]
+    w, gt, pr = rec["weeks"], rec["gt"], rec["pred"]
     # ALL observed visits are the patient history; classical comparators interpolate between existing
     # visits within this range and extrapolate the future points from the full history (see _classical_area).
     last = w.max() if len(w) else 0
@@ -146,18 +154,36 @@ def _panel(ax, eye, rec, new, title_fs=10):
         if new and kind in new:
             pw += list(new[kind][0]); pa += list(new[kind][1])
     pw = np.asarray(pw); pa = np.asarray(pa); o = np.argsort(pw)
-    # y-limits fixed by the STABLE curves (GT, Ours, Linear, copy-forward). Cubic-spline is then drawn
-    # but MASKED to this band -> it shows where it is sensible and just stops (NaN) where it explodes,
-    # so it never distorts the scale and leaves no near-vertical exit streak.
-    yv = list(gt) + list(pa) + list(_classical_area(w, gt, pw[o], "Linear")) + [float(gt[-1])]
+    # Classical comparators, both fit on ALL observed GT visits (the full patient history) and drawn
+    # as ONE curve across the whole panel -- interpolation and extrapolation come from the same fit:
+    #   * Linear       -> one ordinary least-squares line, np.polyfit(w, gt, 1).
+    #   * Cubic-spline -> one scipy CubicSpline through every observed visit (not-a-knot, extrapolate),
+    #                     continued past the last knot. Being an interpolating spline it reproduces the
+    #                     GT exactly at the observed weeks, so inside the observed range it rides on the
+    #                     ground-truth line; it separates only at the midpoints and after the last visit.
+    #   * Copy-forward -> flat at the last observed area.
+    q_all = np.linspace(float(min(pw)), float(max(pw)), 240)
+    # y-limits fixed by the STABLE curves (GT, Ours, the regression line, copy-forward), so the
+    # diverging spline cannot blow up the scale.
+    yv = list(gt) + list(pa) + list(_classical_area(w, gt, q_all, "Linear")) + [float(gt[-1])]
     lo, hi = min(yv), max(yv); pad = 0.15 * (hi - lo + 1e-6)
     ylo, yhi = lo - pad, hi + pad
-    # classical comparators (behind): interpolate between observed visits, extrapolate from full history
     for name, col, dash in CLASSICAL:
-        qa = _classical_area(w, gt, pw[o], name)
-        if name == "Cubic-spline":
-            qa = np.where((qa >= ylo) & (qa <= yhi), qa, np.nan)      # keep the y-scale sane
-        ax.plot(pw[o], qa, ls=dash, color=col, lw=1.3, alpha=0.9, zorder=2)
+        qa = _classical_area(w, gt, q_all, name)
+        # The not-a-knot spline diverges past the last knot (see _classical_area). The curve is drawn up
+        # to the FIRST sample that leaves the plot band and STOPS there, marked with a triangle on the
+        # axis: everything beyond is off-scale, and continuing the clamped curve along the band edge
+        # would draw a long horizontal line that no estimator produced.
+        outside = (qa < ylo) | (qa > yhi)
+        if outside.any():
+            k = int(np.argmax(outside))
+            yk = ylo if qa[k] < ylo else yhi
+            ax.plot(np.append(q_all[:k], q_all[k]), np.append(qa[:k], yk),
+                    ls=dash, color=col, lw=1.3, alpha=0.9, zorder=2)
+            ax.plot([q_all[k]], [yk], ls="none", color=col, marker="v" if qa[k] < ylo else "^",
+                    ms=6.5, mec="white", mew=0.7, zorder=7)
+        else:
+            ax.plot(q_all, qa, ls=dash, color=col, lw=1.3, alpha=0.9, zorder=2)
     # OUR estimate -- highlighted with a translucent halo + solid crimson line on top
     ax.plot(pw[o], pa[o], "-", color=C_PRED, lw=5.0, alpha=0.16, zorder=3, solid_capstyle="round")
     ax.plot(pw[o], pa[o], "-", color=C_PRED, lw=2.2, alpha=0.95, zorder=4)
@@ -177,36 +203,6 @@ def _panel(ax, eye, rec, new, title_fs=10):
     ax.set_ylim(ylo, yhi)
     ax.margins(x=0.06)
     _despine(ax)
-
-
-def _avg_panel(ax, per_eye):
-    maxv = max(len(r["weeks"]) for r in per_eye.values())
-    gtM, prM, wM = [], [], []
-    for i in range(maxv):
-        gts = [r["gt"][i] for r in per_eye.values() if len(r["weeks"]) > i]
-        prs = [r["pred"][i] for r in per_eye.values() if len(r["weeks"]) > i]
-        wks = [r["weeks"][i] for r in per_eye.values() if len(r["weeks"]) > i]
-        gtM.append((np.mean(gts), np.std(gts, ddof=1) / math.sqrt(len(gts)) if len(gts) > 1 else 0))
-        prM.append((np.mean(prs), np.std(prs, ddof=1) / math.sqrt(len(prs)) if len(prs) > 1 else 0))
-        wM.append(np.mean(wks))
-    wM = np.asarray(wM); gm, gse = np.array(gtM).T; pm, pse = np.array(prM).T
-    # No SE band here: the between-eye lesion-size variance is huge (0.7-13 mm^2) and would swamp the
-    # mean-curve DIFFERENCES. Show mean curves only, tight y-axis -> Ours-vs-GT-vs-baselines is visible.
-    # fit each comparator on the cohort-mean HISTORY (all but the last visit) and extrapolate over wM
-    classical = {name: _classical_area(wM[:-1], gm[:-1], wM, name) for name, _, _ in CLASSICAL}
-    for name, col, dash in CLASSICAL:
-        ax.plot(wM, classical[name], ls=dash, color=col, lw=1.6, alpha=0.95, zorder=2, marker="o", ms=4, label=name)
-    ax.plot(wM, pm, "-", color=C_PRED, lw=5.0, alpha=0.16, zorder=3, solid_capstyle="round")
-    ax.plot(wM, pm, "-", color=C_PRED, lw=2.4, zorder=4, label="Ours")
-    ax.scatter(wM, pm, s=40, color=C_PRED, edgecolor="white", linewidths=0.8, zorder=5)
-    ax.plot(wM, gm, "-", color=C_GT, lw=2.2, zorder=5, label="Ground truth")
-    ax.scatter(wM, gm, s=40, color=C_GT, edgecolor="white", linewidths=0.8, zorder=6)
-    ax.set_title("Cohort average (n=%d)" % len(per_eye), fontsize=10, fontweight="bold", color=C_GT)
-    ax.legend(fontsize=7.5, frameon=False, loc="lower right", ncol=1)   # empty region (curves rise L->R)
-    yv = list(gm) + list(pm) + [v for a in classical.values() for v in a]
-    lo, hi = min(yv), max(yv); pad = 0.12 * (hi - lo + 1e-6)
-    ax.set_ylim(lo - pad, hi + pad)
-    ax.margins(x=0.06); _despine(ax)
 
 
 def main():
@@ -248,7 +244,11 @@ def main():
         Line2D([0], [0], marker="o", color=C_RECON, ls="none", ms=8, mec="white", label="Ours: hold-out prediction"),
         Line2D([0], [0], marker="D", color=C_INTERP, ls="none", ms=8, mec="white", label="Ours: interpolation"),
         Line2D([0], [0], marker="^", color=C_EXTRAP, ls="none", ms=9, mec="white", label="Ours: extrapolation"),
-    ] + [Line2D([0], [0], color=col, ls=dash, lw=1.4, label=name) for name, col, dash in CLASSICAL]
+    ] + [Line2D([0], [0], color=col, ls=dash, lw=1.4, label=name)
+         for name, col, dash in CLASSICAL] + [
+        Line2D([0], [0], marker="^", color=dict((n, c) for n, c, _ in CLASSICAL)["Cubic-spline"],
+               ls="none", ms=7, mec="white", label="off-scale (clamped for display)"),
+    ]
     fig.legend(handles=handles, loc="upper center", ncol=5, frameon=False, fontsize=9,
                bbox_to_anchor=(0.5, 0.995), columnspacing=1.4, handletextpad=0.5)
 

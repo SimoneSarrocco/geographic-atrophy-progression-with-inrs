@@ -1,4 +1,8 @@
-faf_ga:
+# Dataset sections. `config_data:` in config_model.yaml (or `--config_data` on the command line)
+# selects which one a run uses; `faf_ga` below is the base and every other section inherits it with
+# `<<: *faf_ga`, overriding only the sampling geometry. Conditions, normalisation, constraints and
+# the split therefore live in ONE place -- edit them here and every variant follows.
+faf_ga: &faf_ga
   dataset_name: faf_ga
   independent_visits: false  # if true: one latent vector for each visit
   mask_grader_mode: 'majority' #  ('single' | 'majority' | 'augment' train-only | 'soft' per-pixel mean of graders)
@@ -48,3 +52,50 @@ faf_ga:
     3: 24
     4: 48
   sampling_bbox: [620, 620]  # the sampling grid size --> we generate 620x620 images
+
+
+# ---------------------------------------------------------------------------------------------
+# Sampling-grid variants of the base section. All of them keep its conditioning (FiLM over
+# weeks-from-baseline + age at visit, temporal axis = weeks_from_baseline) and differ ONLY in the
+# geometry three keys describe:
+#   crop_before_resize  center-crop applied to the native image BEFORE resizing (the field of view)
+#   world_bbox          the grid the INR is sampled on (the resolution)
+#   sampling_bbox       null -> use world_bbox; a value here crops the grid instead of resizing to it
+# GAP-INR is a coordinate-based decoder, so a checkpoint trained at one grid can be EVALUATED at any
+# other without retraining: pass `evaluate.py --config_data <section>`. Only _512 is meant for
+# training (it is what config_model.yaml selects and what the paper model used).
+# ---------------------------------------------------------------------------------------------
+
+# PAPER MODEL. 620 center-crop -> 512 grid. Train with this (config_model.yaml `config_data`).
+faf_ga_twovar_wktemporal_512:
+  <<: *faf_ga
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+
+# EVAL ONLY -- 620 crop -> 256 grid, matching the ImageFlowNet baselines' native resolution
+# (baselines/imageflownet). Use for the extrapolation comparison when you want GAP-INR to both
+# render and score on IFN's grid.
+faf_ga_twovar_wktemporal_256:
+  <<: *faf_ga
+  crop_before_resize: [620, 620]
+  world_bbox: [256, 256]
+  sampling_bbox: null
+
+# EVAL ONLY -- native 620 center-crop, no resize. The interpolation grid (GAP-INR only; the
+# forward-only baselines cannot interpolate a held-out interior visit).
+faf_ga_twovar_wktemporal_620:
+  <<: *faf_ga
+  world_bbox: [620, 620]
+  sampling_bbox: [620, 620]
+
+# EVAL ONLY -- render at the checkpoint's NATIVE 512 grid, then resize BOTH prediction and ground
+# truth to 256 immediately before scoring (`metric_resize`). This is the fair extrapolation setup
+# against ImageFlowNet: same field of view (620 crop) and same metric resolution (256), without
+# forcing the INR to sample on an off-training grid. Hausdorff distances are then in 256-grid pixels.
+faf_ga_twovar_wktemporal_512_to256:
+  <<: *faf_ga
+  crop_before_resize: [620, 620]
+  world_bbox: [512, 512]
+  sampling_bbox: null
+  metric_resize: [256, 256]

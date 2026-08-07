@@ -40,7 +40,7 @@ def initial_setup(cmd_args=None):
     with open(_DEFAULT_CONFIG_DATA, 'r') as stream:
         # Precedence: explicit --config_data on the CLI wins; otherwise use the `config_data`
         # field INSIDE the chosen --config_model file (so per-config data sections like
-        # faf_ga_768 / faf_ga_indep / faf_ga_timeinput are actually honored). Falls back to 'faf_ga'.
+        # faf_ga_twovar_wktemporal_512 / _256 / _620 are actually honored). Falls back to 'faf_ga'.
         config_data = (cmd_args or {}).get('config_data') or args_model.get('config_data', 'faf_ga')
         args_data = {'dataset': yaml.safe_load(stream)[config_data]}
     args = {**args_data, **args_model}
