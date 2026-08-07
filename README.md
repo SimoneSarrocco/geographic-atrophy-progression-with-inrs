@@ -18,7 +18,6 @@ and the figures.
 ## Contents
 - [Attribution, license, citation](#attribution-license-citation)
 - [How it works](#how-it-works)
-- [Model architecture options](#model-architecture-options)
 - [Repository layout](#repository-layout)
 - [Installation](#installation)
 - [Data preparation](#data-preparation)
@@ -26,6 +25,7 @@ and the figures.
 - [Outputs, logging, and checkpoints](#outputs-logging-and-checkpoints)
 - [Reproducing the paper](#reproducing-the-paper)
 - [Configuration reference](#configuration-reference)
+- [Model architecture options](#model-architecture-options)
 
 ---
 
