@@ -7,11 +7,11 @@ and the figures.
 
 <div align="center">
 
-[![arXiv](https://img.shields.io/badge/arXiv-Modelling%20GA%20with%20INRs-black?logo=arXiv&labelColor=darkred
+[![arXiv](https://img.shields.io/badge/arXiv-darkred?logo=arXiv&labelColor=darkred
 )](https://arxiv.org/abs/2406.14794)
 [![Project Page](https://img.shields.io/badge/Project%20Page-black?logo=github
 )](https://simonesarrocco.github.io/geographic-atrophy-progression-inr/)
-[![MICCAI Workshop](https://img.shields.io/badge/MICCAI-OffGrid%20Workshop-purple)](https://off-grid-workshop.github.io/)
+[![MICCAI Workshop](https://img.shields.io/badge/MICCAI%20OffGrid%20Workshop-purple)](https://off-grid-workshop.github.io/)
 
 </div>
 
