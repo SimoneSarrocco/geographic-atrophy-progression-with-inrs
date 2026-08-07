@@ -1,4 +1,4 @@
-# GAP-INR: Geographic Atrophy Progression using Implicit Neural Representations
+# Modelling Geographic Atrophy Progression using Implicit Neural Representations
 
 We model the progression of geographic atrophy (GA) secondary to Age-related Macular Degeneration (AMD) from
 longitudinal Fundus Autofluorescence (FAF) imaging, using Implicit Neural Representations
@@ -21,7 +21,7 @@ and the figures.
 
 ## Attribution, license, citation
 
-This work builds on a prior open-source INR framework ([`CINeMA, Dannecker et al., 2026`](github.com/m-dannecker/CINeMA/tree/main)); see
+This work builds on a prior open-source INR framework ([`CINeMA, Dannecker et al., 2026`](https://github.com/m-dannecker/CINeMA/tree/main)); see
 [`ATTRIBUTION.md`](ATTRIBUTION.md) for the credit. Released under [`LICENSE`](LICENSE) (Apache-2.0),
 **except** `baselines/imageflownet/`, which is a derivative of [`ImageFlowNet, Liu et al., 2025`](https://github.com/KrishnaswamyLab/ImageFlowNet/tree/main), and carries the Yale
 Non-Commercial licence shipped with it
@@ -31,7 +31,7 @@ non-commercial research or evaluation only.
 ## How it works
 
 <p align="center">
-  <img src="docs/Figure1.png" alt="GAP-INR training and test-time optimisation overview" width="900">
+  <img src="docs/model_architecture_updated.png" alt="Our INR's training and test-time optimisation overview" width="900">
 </p>
 
 Each individual eye's disease trajectory is represented as a continuous function. One SIREN autodecoder is shared across the whole
